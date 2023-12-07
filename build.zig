@@ -17,27 +17,41 @@ pub fn build(b: *std.build.Builder) !void {
         .wayland = false,
     });
 
+    const tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "awesome-zig-project",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-    exe.linkLibC();
 
-    exe.addIncludePath(.{ .path = "deps/glad/include/" });
-    exe.addCSourceFile(.{ .file = .{ .path = "deps/glad/src/gl.c" }, .flags = &.{} });
+    inline for (.{ tests, exe }) |compile| {
+        compile.linkLibC();
 
-    exe.addIncludePath(.{ .path = "deps/glfw/include/" });
-    exe.linkLibrary(libglfw);
+        compile.addIncludePath(.{ .path = "deps/glad/include/" });
+        compile.addCSourceFile(.{ .file = .{ .path = "deps/glad/src/gl.c" }, .flags = &.{} });
+
+        compile.addIncludePath(.{ .path = "deps/glfw/include/" });
+        compile.linkLibrary(libglfw);
+    }
 
     b.installArtifact(exe);
 
+    const step_test = b.step("test", "Test awesome-zig-project");
+    const run_tests = b.addRunArtifact(tests);
+
+    step_test.dependOn(&run_tests.step);
+
     const command_run = b.step("run", "Build and run awesome-zig-project");
     const run_exe = b.addRunArtifact(exe);
-    command_run.dependOn(&run_exe.step);
-
     run_exe.addArgs(b.args orelse &.{});
+
+    command_run.dependOn(&run_exe.step);
 
     const docs = b.option(bool, "docs", "Build documentation");
 
