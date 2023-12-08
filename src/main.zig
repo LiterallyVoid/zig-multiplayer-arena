@@ -27,6 +27,16 @@ pub fn main() !void {
     _ = shader;
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
+        var width: c_int = 0;
+        var height: c_int = 0;
+
+        c.glfwGetFramebufferSize(window, &width, &height);
+
+        c.glViewport(0, 0, width, height);
+
+        c.glClearColor(0.2, 0.5, 1.0, 1.0);
+        c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
+
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
     }
