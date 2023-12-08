@@ -5,6 +5,9 @@ pub const linalg = @import("./linalg.zig");
 pub const Shader = @import("./Shader.zig");
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
+
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     defer c.glfwTerminate();
 
@@ -18,6 +21,9 @@ pub fn main() !void {
         c.GLAD_VERSION_MAJOR(gl_version),
         c.GLAD_VERSION_MINOR(gl_version),
     });
+
+    const shader = try Shader.load(allocator, "data/debug/shader-flat");
+    _ = shader;
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         c.glfwSwapBuffers(window);

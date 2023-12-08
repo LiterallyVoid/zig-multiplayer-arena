@@ -1,4 +1,96 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+const c = @import("./c.zig");
+
+const Self = @This();
+
+pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
+    std.log.info("Pretend I'm compiling a shader with vertex source {s} and fragment source {s}", .{ vertex_source, fragment_source });
+
+    return undefined; // lol
+}
+
+pub fn load(allocator: Allocator, path: []const u8) !Self {
+    // # Vertex shader
+    const vertex_path = try std.mem.concat(allocator, u8, &.{ path, ".vert" });
+    defer allocator.free(vertex_path);
+
+    const vertex_source = try readShaderEvaluateIncludes(allocator, vertex_path);
+    defer allocator.free(vertex_source);
+
+    // # Fragment shader
+    const fragment_path = try std.mem.concat(allocator, u8, &.{ path, ".frag" });
+    defer allocator.free(fragment_path);
+
+    const fragment_source = try readShaderEvaluateIncludes(allocator, fragment_path);
+    defer allocator.free(fragment_source);
+
+    return Self.init(vertex_source, fragment_source);
+}
+
+pub fn readShaderEvaluateIncludes(allocator: Allocator, path: []const u8) ![]const u8 {
+    const source = std.fs.cwd().readFileAlloc(allocator, path, 16 * 1_024 * 1_024) catch |err| {
+        std.log.info("couldn't open {s}: {}", .{ path, err });
+
+        return err;
+    };
+    defer allocator.free(source);
+
+    const parsed = try parseShaderIncludes(allocator, source);
+
+    var total_length: usize = 0;
+    for (parsed.sources) |source_segment| {
+        total_length += source_segment.len;
+    }
+
+    var included_files_parsed = try std.ArrayListUnmanaged([]const u8)
+        .initCapacity(allocator, parsed.file_paths.len);
+    defer included_files_parsed.deinit(allocator);
+    defer for (included_files_parsed.items) |included_file_parsed| {
+        allocator.free(included_file_parsed);
+    };
+
+    const directory_of_containing_file = blk: {
+        const last_slash_end = if (std.mem.lastIndexOfScalar(u8, path, '/')) |last_slash|
+            last_slash + 1
+        else
+            0;
+        break :blk path[0..last_slash_end];
+    };
+
+    for (parsed.file_paths) |relative_path| {
+        const resolved_path = try std.mem.concat(allocator, u8, &.{
+            directory_of_containing_file,
+            relative_path,
+        });
+        defer allocator.free(resolved_path);
+
+        const contents = try readShaderEvaluateIncludes(allocator, resolved_path);
+
+        included_files_parsed.appendAssumeCapacity(contents);
+
+        total_length += contents.len;
+    }
+
+    var concatenated = try std.ArrayListUnmanaged(u8)
+        .initCapacity(allocator, total_length);
+    errdefer concatenated.deinit(allocator);
+
+    concatenated.appendSliceAssumeCapacity(parsed.sources[0]);
+
+    for (included_files_parsed.items, parsed.sources[1..]) |included_file, source_slice| {
+        concatenated.appendSliceAssumeCapacity(included_file);
+        concatenated.appendSliceAssumeCapacity(source_slice);
+    }
+
+    std.debug.assert(concatenated.items.len == total_length);
+
+    // Should never fail, because it should be exactly the right length already.
+    return try concatenated.toOwnedSlice(allocator);
+}
+
+gl_vao: c.GLuint,
 
 /// If `text` starts with `prefix`, return `text` with `prefix` removed.
 pub fn cutPrefix(text: []const u8, prefix: []const u8) ?[]const u8 {
