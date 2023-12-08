@@ -8,7 +8,10 @@ const Self = @This();
 pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
     const program = c.glCreateProgram();
 
-    inline for (.{ c.GL_VERTEX_SHADER, c.GL_FRAGMENT_SHADER }, .{ vertex_source, fragment_source }) |stage, source| {
+    inline for (
+        .{ c.GL_VERTEX_SHADER, c.GL_FRAGMENT_SHADER },
+        .{ vertex_source, fragment_source },
+    ) |stage, source| {
         const shader = c.glCreateShader(stage);
 
         const source_len_c_int: c_int = @intCast(source.len);
