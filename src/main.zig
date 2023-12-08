@@ -3,6 +3,7 @@ const std = @import("std");
 const c = @import("./c.zig");
 pub const linalg = @import("./linalg.zig");
 pub const Shader = @import("./Shader.zig");
+pub const Model = @import("./Model.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
