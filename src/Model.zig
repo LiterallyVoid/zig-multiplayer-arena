@@ -82,7 +82,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 
     const bones_slice = try bones.toOwnedSlice(allocator);
 
-    // From here on out, allocation safety has been THROWN OF OUT THE WINDOW. Here be dragons.
+    // From here on out, allocation safety has been THROWN OF OUT THE WINDOW. Here be dragons. (I don't hate zig I don't hate zig I don't hate zig I don't hate zig)
 
     return Self{
         .bones = bones_slice,
