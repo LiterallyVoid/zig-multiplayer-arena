@@ -105,7 +105,7 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
 
         pub fn zero() Self {
             var self: Self = undefined;
-            inline for (self.data) |*el| {
+            inline for (&self.data) |*el| {
                 el.* = 0.0;
             }
             return self;
@@ -113,7 +113,7 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
 
         pub fn broadcast(value: Element) Self {
             var self: Self = undefined;
-            inline for (self.data) |*el| {
+            inline for (&self.data) |*el| {
                 el.* = value;
             }
             return self;
@@ -431,7 +431,7 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
 
         pub fn multiplyVector(self: Self, vec: Vec) Vec {
             var v = Vec.zero();
-            inline for (v.data, 0..) |*el, i| {
+            inline for (&v.data, 0..) |*el, i| {
                 comptime var j = 0;
                 inline while (j < dim) : (j += 1) {
                     el.* += self.data[j][i] * vec.data[j];
@@ -682,16 +682,16 @@ pub const Quaternion = struct {
 
     pub fn fromArray(comptime T: type, arr: [4]T) Self {
         var self: Self = undefined;
-        inline for (arr, 0..) |elem, i| {
-            self.data[i] = primitiveCast(f32, elem);
+        inline for (&self.data, arr) |*dest, src| {
+            dest.* = primitiveCast(f32, src);
         }
         return self;
     }
 
     pub fn toArray(self: Self, comptime T: type) [4]T {
         var array: [4]T = undefined;
-        inline for (self.data, 0..) |el, i| {
-            array[i] = primitiveCast(T, el);
+        inline for (self.data, &array) |src, *dest| {
+            dest.* = primitiveCast(T, src);
         }
         return array;
     }
