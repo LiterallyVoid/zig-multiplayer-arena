@@ -34,6 +34,12 @@ bones: []Bone,
 rest_pose: Pose,
 frames: []Pose,
 
+gl_vao: c.GLuint = 0,
+gl_vbo: c.GLuint = 0,
+
+/// Required, because `vertices` may be freed after upload.
+vertices_count: usize = 0,
+
 pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
     allocator.free(self.vertices);
 
@@ -44,6 +50,50 @@ pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
 
     for (self.frames) |frame| frame.deinit(allocator);
     allocator.free(self.frames);
+}
+
+pub fn upload(self: *Self) void {
+    c.glGenVertexArrays(1, &self.gl_vao);
+
+    c.glBindVertexArray(self.gl_vao);
+
+    c.glGenBuffers(1, &self.gl_vbo);
+
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, self.gl_vbo);
+    c.glBufferData(
+        c.GL_ARRAY_BUFFER,
+        @intCast(self.vertices.len * @sizeOf(Vertex)),
+        self.vertices.ptr,
+        c.GL_STATIC_DRAW,
+    );
+    self.vertices_count = self.vertices.len;
+
+    c.glEnableVertexAttribArray(0);
+    c.glVertexAttribPointer(
+        0,
+        3,
+        c.GL_FLOAT,
+        c.GL_FALSE,
+        @sizeOf(Vertex),
+        @ptrFromInt(@offsetOf(Vertex, "position")),
+    );
+
+    c.glEnableVertexAttribArray(1);
+    c.glVertexAttribPointer(
+        1,
+        3,
+        c.GL_FLOAT,
+        c.GL_FALSE,
+        @sizeOf(Vertex),
+        @ptrFromInt(@offsetOf(Vertex, "normal")),
+    );
+
+    c.glBindVertexArray(0);
+}
+
+pub fn draw(self: Self) void {
+    c.glBindVertexArray(self.gl_vao);
+    c.glDrawArrays(c.GL_TRIANGLES, 0, @intCast(self.vertices_count));
 }
 
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
