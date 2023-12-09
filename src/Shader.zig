@@ -109,8 +109,6 @@ pub fn readShaderEvaluateIncludes(allocator: Allocator, path: []const u8) ![]con
     return try concatenated.toOwnedSlice(allocator);
 }
 
-gl_vao: c.GLuint,
-
 /// If `text` starts with `prefix`, return `text` with `prefix` removed.
 pub fn cutPrefix(text: []const u8, prefix: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, text, prefix)) {
