@@ -5,6 +5,8 @@ const c = @import("./c.zig");
 
 const Self = @This();
 
+gl_program: c.GLuint,
+
 pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
     const program = c.glCreateProgram();
 
@@ -25,7 +27,15 @@ pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
 
     c.glLinkProgram(program);
 
-    return undefined; // lol
+    return .{ .gl_program = program };
+}
+
+pub fn deinit(self: Self) void {
+    c.glDeleteProgram(self.gl_program);
+}
+
+pub fn bind(self: Self) void {
+    c.glUseProgram(self.gl_program);
 }
 
 pub fn load(allocator: Allocator, path: []const u8) !Self {
