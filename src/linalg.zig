@@ -579,21 +579,23 @@ pub const IVec3 = Vector(3, i32, null);
 pub const IVec4 = Vector(4, i32, null);
 
 pub const Quaternion = struct {
+    const Self = @This();
+
     data: [4]f32,
 
-    pub fn new(_x: f32, _y: f32, _z: f32, _w: f32) @This() {
-        return @This(){ .data = [_]f32{ _x, _y, _z, _w } };
+    pub fn new(_x: f32, _y: f32, _z: f32, _w: f32) Self {
+        return Self{ .data = [_]f32{ _x, _y, _z, _w } };
     }
 
-    pub fn identity() @This() {
-        return @This(){ .data = [_]f32{ 0, 0, 0, 1 } };
+    pub fn identity() Self {
+        return Self{ .data = [_]f32{ 0, 0, 0, 1 } };
     }
 
-    pub fn fromAngularVelocity(velocity: Vec3) @This() {
+    pub fn fromAngularVelocity(velocity: Vec3) Self {
         var length = velocity.length() * 0.5;
 
         if (length <= 0.0) {
-            return @This(){
+            return Self{
                 .data = .{
                     velocity.data[0] * 0.5,
                     velocity.data[1] * 0.5,
@@ -605,7 +607,7 @@ pub const Quaternion = struct {
 
         var half = velocity.mulScalar((std.math.sin(length) / length) * 0.5);
 
-        return @This(){
+        return Self{
             .data = .{
                 half.data[0],
                 half.data[1],
@@ -615,41 +617,41 @@ pub const Quaternion = struct {
         };
     }
 
-    pub fn axisAngle(axis: Vec3, angle: f32) @This() {
+    pub fn axisAngle(axis: Vec3, angle: f32) Self {
         var s = std.math.sin(angle * 0.5);
         var c = std.math.cos(angle * 0.5);
         var tmp = axis.mulScalar(s);
-        return @This(){ .data = [_]f32{ tmp.data[0], tmp.data[1], tmp.data[2], c } };
+        return Self{ .data = [_]f32{ tmp.data[0], tmp.data[1], tmp.data[2], c } };
     }
 
-    pub fn mul(lhs: @This(), rhs: @This()) @This() {
+    pub fn mul(lhs: Self, rhs: Self) Self {
         var lhs_3 = Vec3.new(lhs.data[0], lhs.data[1], lhs.data[2]);
         var rhs_3 = Vec3.new(rhs.data[0], rhs.data[1], rhs.data[2]);
         var tmp = lhs_3.cross(rhs_3);
         tmp = tmp.add(lhs_3.mulScalar(rhs.data[3]));
         tmp = tmp.add(rhs_3.mulScalar(lhs.data[3]));
         var w = (lhs.data[3] * rhs.data[3]) - lhs_3.dot(rhs_3);
-        return @This(){ .data = [_]f32{ tmp.data[0], tmp.data[1], tmp.data[2], w } };
+        return Self{ .data = [_]f32{ tmp.data[0], tmp.data[1], tmp.data[2], w } };
     }
 
-    pub fn dot(self: @This(), other: @This()) f32 {
+    pub fn dot(self: Self, other: Self) f32 {
         return self.data[0] * other.data[0] + self.data[1] * other.data[1] + self.data[2] * other.data[2] + self.data[3] * other.data[3];
     }
 
-    pub fn mulScalar(self: @This(), value: f32) @This() {
-        return @This().new(self.data[0] * value, self.data[1] * value, self.data[2] * value, self.data[3] * value);
+    pub fn mulScalar(self: Self, value: f32) Self {
+        return Self.new(self.data[0] * value, self.data[1] * value, self.data[2] * value, self.data[3] * value);
     }
 
-    pub fn add(self: @This(), other: @This()) @This() {
-        return @This().new(self.data[0] + other.data[0], self.data[1] + other.data[1], self.data[2] + other.data[2], self.data[3] + other.data[3]);
+    pub fn add(self: Self, other: Self) Self {
+        return Self.new(self.data[0] + other.data[0], self.data[1] + other.data[1], self.data[2] + other.data[2], self.data[3] + other.data[3]);
     }
 
-    pub fn normalized(self: @This()) @This() {
+    pub fn normalized(self: Self) Self {
         var fac = 1.0 / std.math.sqrt(self.dot(self));
         return self.mulScalar(fac);
     }
 
-    pub fn slerp(self: @This(), other: @This(), t: f32) @This() {
+    pub fn slerp(self: Self, other: Self, t: f32) Self {
         var self_n = self.normalized();
         var other_n = other.normalized();
         var dotprod = self_n.dot(other_n);
@@ -678,7 +680,23 @@ pub const Quaternion = struct {
         return num * num;
     }
 
-    pub fn toMatrix(self: @This()) Mat3 {
+    pub fn fromArray(comptime T: type, arr: [4]T) Self {
+        var self: Self = undefined;
+        inline for (arr, 0..) |elem, i| {
+            self.data[i] = primitiveCast(f32, elem);
+        }
+        return self;
+    }
+
+    pub fn toArray(self: Self, comptime T: type) [4]T {
+        var array: [4]T = undefined;
+        inline for (self.data, 0..) |el, i| {
+            array[i] = primitiveCast(T, el);
+        }
+        return array;
+    }
+
+    pub fn toMatrix(self: Self) Mat3 {
         var x = self.data[0];
         var y = self.data[1];
         var z = self.data[2];
@@ -704,7 +722,7 @@ pub const Quaternion = struct {
         };
     }
 
-    pub fn mulVector(self: @This(), other: Vec3) Vec3 {
+    pub fn mulVector(self: Self, other: Vec3) Vec3 {
         return self.toMatrix().multiplyVectorOpp(other);
     }
 };
