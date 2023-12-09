@@ -23,7 +23,7 @@ pub fn main() !void {
         c.GLAD_VERSION_MINOR(gl_version),
     });
 
-    const shader = try Shader.load(allocator, "data/debug/shader-flat");
+    const shader = try Shader.load(allocator, "assets/debug/shader-flat");
     _ = shader;
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
