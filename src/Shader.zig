@@ -19,6 +19,8 @@ pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
         const source_len_c_int: c_int = @intCast(source.len);
 
         c.glShaderSource(shader, 1, &source.ptr, &source_len_c_int);
+        c.glCompileShader(shader);
+
         c.glAttachShader(program, shader);
 
         // Shaders are reference counted or something I'll delete it right now.
