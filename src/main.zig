@@ -7,6 +7,7 @@ pub const Model = @import("./Model.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
     var allocator = gpa.allocator();
 
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
