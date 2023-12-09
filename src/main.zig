@@ -42,7 +42,17 @@ pub fn main() !void {
         c.glClearColor(0.2, 0.5, 1.0, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
-        shader.bind();
+        var matrix = linalg.Mat4.perspective(1.1, @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height)), 0.1, 100.0);
+
+        matrix = matrix.multiply(linalg.Mat4.lookAt(
+            linalg.Vec3.new(5.0, 5.0, 5.0),
+            linalg.Vec3.new(0.0, 0.0, 0.0),
+            linalg.Vec3.new(0.0, 0.0, 1.0),
+        ));
+
+        shader.bindWithUniforms(.{
+            .u_matrix = matrix,
+        });
         model.draw();
 
         c.glfwSwapBuffers(window);
