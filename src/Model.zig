@@ -29,11 +29,14 @@ pub const Pose = struct {
     }
 };
 
+vertices: []Vertex,
 bones: []Bone,
 rest_pose: Pose,
 frames: []Pose,
 
 pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+    allocator.free(self.vertices);
+
     for (self.bones) |bone| allocator.free(bone.name);
     allocator.free(self.bones);
 
@@ -67,7 +70,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     _ = bone_frames_pos;
 
     const vertices = try allocator.alloc(Vertex, vertices_len);
-    defer allocator.free(vertices);
+    errdefer allocator.free(vertices);
 
     try file.seekTo(vertices_pos);
     for (vertices) |*vertex| {
@@ -120,6 +123,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     const frames_slice = try frames.toOwnedSlice(allocator);
 
     return Self{
+        .vertices = vertices,
         .bones = bones_slice,
         .rest_pose = rest_pose,
         .frames = frames_slice,
