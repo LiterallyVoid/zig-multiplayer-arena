@@ -6,7 +6,7 @@ pub const Shader = @import("./Shader.zig");
 pub const Model = @import("./Model.zig");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = if (std.debug.sys_can_stack_trace) 10 else 0 }){};
     defer _ = gpa.deinit();
     var allocator = gpa.allocator();
 
