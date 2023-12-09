@@ -55,6 +55,8 @@ pub fn readShaderEvaluateIncludes(allocator: Allocator, path: []const u8) ![]con
     defer allocator.free(source);
 
     const parsed = try parseShaderIncludes(allocator, source);
+    defer allocator.free(parsed.sources);
+    defer allocator.free(parsed.file_paths);
 
     var total_length: usize = 0;
     for (parsed.sources) |source_segment| {
