@@ -25,9 +25,10 @@ pub fn main() !void {
     });
 
     const shader = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
-    _ = shader;
+    defer shader.deinit();
 
-    const model = try Model.load(allocator, "zig-out/assets/debug/cube.model");
+    var model = try Model.load(allocator, "zig-out/assets/debug/cube.model");
+    model.upload();
     defer model.deinit(allocator);
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
@@ -40,6 +41,9 @@ pub fn main() !void {
 
         c.glClearColor(0.2, 0.5, 1.0, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
+
+        shader.bind();
+        model.draw();
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
