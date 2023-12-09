@@ -3,6 +3,8 @@ const Allocator = std.mem.Allocator;
 
 const c = @import("./c.zig");
 
+const linalg = @import("./linalg.zig");
+
 const Self = @This();
 
 gl_program: c.GLuint,
@@ -38,6 +40,23 @@ pub fn deinit(self: Self) void {
 
 pub fn bind(self: Self) void {
     c.glUseProgram(self.gl_program);
+}
+
+pub fn bindWithUniforms(self: Self, uniforms: anytype) void {
+    c.glUseProgram(self.gl_program);
+
+    inline for (@typeInfo(@TypeOf(uniforms)).Struct.fields) |field| {
+        const location = c.glGetUniformLocation(self.gl_program, field.name ++ "\x00");
+
+        const value = @field(uniforms, field.name);
+
+        switch (@TypeOf(value)) {
+            f32 => c.glUniform1f(location, value),
+            linalg.Mat4 => c.glUniformMatrix4fv(location, 1, c.GL_FALSE, @ptrCast(&value)),
+            []linalg.Mat4 => c.glUniformMatrix4fv(location, value.len, c.GL_FALSE, @ptrCast(value)),
+            else => @compileError("unknown uniform type: " ++ @typeName(@TypeOf(value))),
+        }
+    }
 }
 
 pub fn load(allocator: Allocator, path: []const u8) !Self {
