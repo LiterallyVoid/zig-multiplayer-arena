@@ -1,6 +1,61 @@
 const std = @import("std");
 const buildGlfw = @import("deps/glfw-build-zig/build.zig").buildGlfw;
 
+pub fn buildAssets(b: *std.build.Builder, step: *std.Build.Step) !void {
+    const blender = b.option([]const u8, "blender", "Blender (4.0+) command") orelse "blender";
+
+    const root = "assets";
+
+    var dir = try std.fs.cwd().openIterableDir(root, .{});
+    defer dir.close();
+
+    var walker = try dir.walk(b.allocator);
+    defer walker.deinit();
+
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+
+        const extension = std.fs.path.extension(entry.basename);
+        const path_without_extension = entry.path[0 .. entry.path.len - extension.len];
+
+        const source_path = try std.mem.concat(b.allocator, u8, &.{ root, "/", entry.path });
+        const dest_path_without_extension = try std.mem.concat(b.allocator, u8, &.{ "assets/", path_without_extension });
+
+        if (std.mem.eql(u8, extension, ".blend")) {
+            const exportFile = b.addSystemCommand(&.{blender});
+            exportFile.addFileArg(.{ .path = source_path });
+
+            exportFile.addArg("-P");
+            exportFile.addFileArg(.{ .path = "tools/blender_export_model.py" });
+            exportFile.addArg("-b");
+
+            exportFile.addArg("--");
+
+            exportFile.addArg("-o");
+            const exported_model = exportFile.addOutputFileArg("model");
+
+            const dest_path = try std.mem.concat(
+                b.allocator,
+                u8,
+                &.{ dest_path_without_extension, ".model" },
+            );
+
+            const install_file = b.addInstallFile(exported_model, dest_path);
+
+            step.dependOn(&exportFile.step);
+            step.dependOn(&install_file.step);
+        } else if (std.mem.eql(u8, extension, ".vert") or std.mem.eql(u8, extension, ".frag") or std.mem.eql(u8, extension, ".glsl")) {
+            const dest_path = try std.mem.concat(
+                b.allocator,
+                u8,
+                &.{ dest_path_without_extension, extension },
+            );
+            const install_file = b.addInstallFile(.{ .path = source_path }, dest_path);
+            step.dependOn(&install_file.step);
+        }
+    }
+}
+
 pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -64,4 +119,7 @@ pub fn build(b: *std.build.Builder) !void {
 
         b.getInstallStep().dependOn(&install_docs.step);
     }
+
+    const assets_step = b.step("assets", "Build assets");
+    try buildAssets(b, assets_step);
 }
