@@ -556,6 +556,17 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
             }
             return array;
         }
+
+        pub fn fromArray(comptime T: type, comptime row_major: bool, array: [dim * dim]T) Self {
+            var self: Self = undefined;
+            inline for (&self.data, 0..) |*row, i| {
+                inline for (row, 0..) |*element, j| {
+                    const id = if (row_major) (i * dim + j) else (j * dim + i);
+                    element.* = primitiveCast(T, array[id]);
+                }
+            }
+            return self;
+        }
     };
 }
 

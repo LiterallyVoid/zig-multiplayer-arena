@@ -113,6 +113,7 @@ def export_scene(scene):
 	return bind_pose, frame_poses 
 
 bind_pose, frame_poses = export_scene(bpy.context.scene)
+rest_pose = bind_pose
 
 FILE_MAGIC = b"aMdl"
 FILE_VERSION = 2
@@ -148,7 +149,7 @@ with open(export_path, "wb") as file:
 
 	file.write(struct.pack('<I', len(bones_by_id)))
 	bones_ptr = patchable_pointer(file)
-	bind_pose_ptr = patchable_pointer(file)
+	rest_pose_ptr = patchable_pointer(file)
 
 	file.write(struct.pack('<I', len(frame_poses)))
 	bone_frames_ptr = patchable_pointer(file)
@@ -158,16 +159,19 @@ with open(export_path, "wb") as file:
 		file.write(vertex)
 
 	patch_pointer_to_cursor(bones_ptr)
-	for bone in bones_by_id:
+	for bone, bind_matrix in zip(bones_by_id, bind_pose):
 		# FIXME: the same bone in multiple armatures will have the same name!
 		name = bone.pose_bone.name
 		name_bytes = name.encode("utf-8")
 
-		file.write(struct.pack('<B32s', len(name_bytes), name_bytes))
+		file.write(struct.pack('<B', len(name_bytes)))
+		file.write(name_bytes)
 
-	patch_pointer_to_cursor(bind_pose_ptr)
-	file.write(pack_pose(bind_pose, None))
+		file.write(struct.pack('<16f', *bind_matrix.inverted()))
+
+	patch_pointer_to_cursor(rest_pose_ptr)
+	file.write(pack_pose(rest_pose, None))
 
 	patch_pointer_to_cursor(bone_frames_ptr)
 	for frame_pose in frame_poses:
-		file.write(pack_pose(frame_pose, bind_pose))
+		file.write(pack_pose(frame_pose, rest_pose))
