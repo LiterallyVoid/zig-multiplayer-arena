@@ -3,6 +3,8 @@ const c = @import("./c.zig");
 
 const linalg = @import("./linalg.zig");
 
+const Self = @This();
+
 pub const Vertex = struct {
     position: [3]f32,
     normal: [3]f32,
@@ -21,13 +23,25 @@ pub const BonePose = struct {
 
 pub const Pose = struct {
     bones: []BonePose,
+
+    pub fn deinit(self: Pose, allocator: std.mem.Allocator) void {
+        allocator.free(self.bones);
+    }
 };
 
 bones: []Bone,
 rest_pose: Pose,
 frames: []Pose,
 
-const Self = @This();
+pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+    for (self.bones) |bone| allocator.free(bone.name);
+    allocator.free(self.bones);
+
+    self.rest_pose.deinit(allocator);
+
+    for (self.frames) |frame| frame.deinit(allocator);
+    allocator.free(self.frames);
+}
 
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     const file = try std.fs.cwd().openFile(path, .{});

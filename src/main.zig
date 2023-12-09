@@ -28,7 +28,7 @@ pub fn main() !void {
     _ = shader;
 
     const model = try Model.load(allocator, "zig-out/assets/debug/cube.model");
-    _ = model;
+    defer model.deinit(allocator);
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         var width: c_int = 0;
