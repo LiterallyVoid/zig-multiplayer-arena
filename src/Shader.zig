@@ -9,13 +9,30 @@ const Self = @This();
 
 gl_program: c.GLuint,
 
+fn reportInfoLog(
+    label: []const u8,
+    name: c.GLuint,
+    getInfo: c.PFNGLGETSHADERINFOLOGPROC,
+) void {
+    var log: [8192]u8 = undefined;
+
+    var length: c.GLint = 0;
+    getInfo.?(name, 1024, &length, &log);
+
+    std.log.err("{s} log: {s}", .{
+        label,
+        log[0..@intCast(length)],
+    });
+}
+
 pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
     const program = c.glCreateProgram();
 
     inline for (
         .{ c.GL_VERTEX_SHADER, c.GL_FRAGMENT_SHADER },
         .{ vertex_source, fragment_source },
-    ) |stage, source| {
+        .{ "vertex shader", "fragment shader" },
+    ) |stage, source, label| {
         const shader = c.glCreateShader(stage);
 
         const source_len_c_int: c_int = @intCast(source.len);
@@ -25,11 +42,15 @@ pub fn init(vertex_source: []const u8, fragment_source: []const u8) Self {
 
         c.glAttachShader(program, shader);
 
+        reportInfoLog(label, shader, c.glad_glGetShaderInfoLog);
+
         // Shaders are reference counted or something I'll delete it right now.
         c.glDeleteShader(shader);
     }
 
     c.glLinkProgram(program);
+
+    reportInfoLog("program", program, c.glad_glGetProgramInfoLog);
 
     return .{ .gl_program = program };
 }
