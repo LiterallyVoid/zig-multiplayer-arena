@@ -42,6 +42,8 @@ pub fn main() !void {
         c.glClearColor(0.2, 0.5, 1.0, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
+        c.glEnable(c.GL_DEPTH_TEST);
+
         var matrix = linalg.Mat4.perspective(1.1, @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height)), 0.1, 100.0);
 
         matrix = matrix.multiply(linalg.Mat4.lookAt(
