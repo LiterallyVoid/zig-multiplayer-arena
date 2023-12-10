@@ -24,7 +24,7 @@ pub fn main() !void {
         c.GLAD_VERSION_MINOR(gl_version),
     });
 
-    const shader = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
+    const shader = try Shader.load(allocator, "zig-out/assets/debug/shader-grid");
     defer shader.deinit();
 
     var model = try Model.load(allocator, "zig-out/assets/debug/cube.model");
