@@ -159,10 +159,11 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     }
 
     const rest_pose = try loadPose(allocator, reader, bones_len);
+    errdefer rest_pose.deinit(allocator);
 
     var frames = try std.ArrayListUnmanaged(Pose).initCapacity(allocator, frames_len);
     errdefer frames.deinit(allocator);
-    errdefer for (frames.items) |frame| allocator.free(frame.bones);
+    errdefer for (frames.items) |frame| frame.deinit(allocator);
 
     for (0..frames_len) |_| {
         frames.appendAssumeCapacity(try loadPose(allocator, reader, bones_len));
@@ -182,7 +183,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 
 fn loadPose(allocator: std.mem.Allocator, reader: anytype, bones_count: usize) !Pose {
     var bones = try allocator.alloc(BonePose, bones_count);
-    defer allocator.free(bones);
+    errdefer allocator.free(bones);
 
     for (bones) |*bone| {
         var translation: [3]f32 = undefined;
