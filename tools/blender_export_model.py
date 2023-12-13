@@ -153,7 +153,7 @@ bind_pose, frame_poses = export_scene(bpy.context.scene)
 rest_pose = bind_pose
 
 FILE_MAGIC = b"aMdl"
-FILE_VERSION = 3
+FILE_VERSION = 4
 
 def patchable_pointer(file):
 	position = file.tell()
@@ -203,6 +203,11 @@ with open(export_path, "wb") as file:
 
 		file.write(struct.pack('<B', len(name_bytes)))
 		file.write(name_bytes)
+
+		if bone.parent_id is None:
+			file.write(struct.pack('<H', 0xFF_FF))
+		else:
+			file.write(struct.pack('<H', bone.parent_id))
 
 		file.write(struct.pack('<16f', *(elem for row in bind_matrix.inverted() for elem in row)))
 

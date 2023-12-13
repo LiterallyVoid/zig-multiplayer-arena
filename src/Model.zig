@@ -14,6 +14,8 @@ pub const Vertex = struct {
 
 pub const Bone = struct {
     name: []const u8,
+    parent: ?u16,
+
     bind_pose_inverse: linalg.Mat4,
 };
 
@@ -125,7 +127,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     std.debug.assert(std.mem.eql(u8, &magic, "aMdl"));
 
     const version = try reader.readIntLittle(u32);
-    std.debug.assert(version == 3);
+    std.debug.assert(version == 4);
 
     const vertices_len = try reader.readIntLittle(u32);
     const vertices_pos = try file.getPos() + try reader.readIntLittle(u32);
@@ -168,12 +170,20 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
         allocator.free(bone.name);
     };
 
-    for (0..bones_len) |_| {
+    for (0..bones_len) |i| {
         const name_len = try reader.readIntLittle(u8);
         const name = try allocator.alloc(u8, name_len);
         errdefer allocator.free(name);
 
         try reader.readNoEof(name);
+
+        var parent: ?u16 = null;
+
+        const parent_id = try reader.readIntLittle(u16);
+        if (parent_id != 0xFF_FF) {
+            std.debug.assert(parent_id < i);
+            parent = parent_id;
+        }
 
         var bind_pose_inverse: [16]f32 = .{0.0} ** 16;
         for (&bind_pose_inverse) |*element| {
@@ -182,6 +192,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 
         const bone = Bone{
             .name = name,
+            .parent = parent,
             .bind_pose_inverse = linalg.Mat4.fromArray(f32, true, bind_pose_inverse),
         };
         bones.appendAssumeCapacity(bone);
