@@ -47,18 +47,24 @@ pub fn main() !void {
         var matrix = linalg.Mat4.perspective(1.1, @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height)), 0.1, 100.0);
 
         matrix = matrix.multiply(linalg.Mat4.lookAt(
-            linalg.Vec3.new(2.0, 2.0, 2.0),
+            linalg.Vec3.new(-2.0, 2.0, 2.0),
             linalg.Vec3.new(0.0, 0.0, 0.0),
             linalg.Vec3.new(0.0, 0.0, 1.0),
         ));
 
         // TODO: use an arena allocator here
-        var pose = try model.blankPose(allocator);
-        defer pose.deinit(allocator);
+        var pose_1 = try model.blankPose(allocator);
+        defer pose_1.deinit(allocator);
 
-        pose.fromInterpolation(model.framePose(120), model.framePose(121), 0.5);
+        var pose_2 = try model.blankPose(allocator);
+        defer pose_2.deinit(allocator);
 
-        const bone_matrices = try model.poseMatrices(allocator, pose);
+        pose_1.fromInterpolation(model.framePose(152), model.framePose(153), 0.5);
+        pose_2.fromCopy(model.rest_pose);
+
+        pose_2.addLayer(pose_1, 1.0);
+
+        const bone_matrices = try model.poseMatrices(allocator, pose_2);
         defer allocator.free(bone_matrices);
 
         shader.bindWithUniforms(.{

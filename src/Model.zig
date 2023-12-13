@@ -41,6 +41,28 @@ pub const Pose = struct {
             self_bone.scale = a_bone.scale.mix(b_bone.scale, ratio);
         }
     }
+
+    pub fn fromCopy(self: *Pose, from: Pose) void {
+        for (self.bones, from.bones) |*self_bone, from_bone| {
+            self_bone.* = from_bone;
+        }
+    }
+
+    pub fn addLayer(self: *Pose, layer: Pose, weight: f32) void {
+        for (self.bones, layer.bones) |*self_bone, layer_bone| {
+            const rotation = linalg.Quaternion
+                .identity()
+                .slerp(layer_bone.rotation, weight);
+
+            self_bone.translation = rotation.mulVector(self_bone.translation)
+                .add(layer_bone.translation.mulScalar(weight));
+
+            self_bone.rotation = rotation.mul(self_bone.rotation);
+
+            self_bone.scale = self_bone.scale
+                .mul(linalg.Vec3.new(1.0, 1.0, 1.0).mix(layer_bone.scale, weight));
+        }
+    }
 };
 
 vertices: []Vertex,
@@ -151,7 +173,7 @@ pub fn poseMatrices(self: Self, allocator: std.mem.Allocator, pose: Pose) ![]lin
         matrix_local = matrix_local.multiply(linalg.Mat4.scaleVec(pose_bone.scale));
 
         if (bone.parent) |parent_id| {
-            matrix.* = matrix_local.multiply(matrices[parent_id]);
+            matrix.* = matrices[parent_id].multiply(matrix_local);
         } else {
             matrix.* = matrix_local;
         }
