@@ -25,13 +25,13 @@ def pack_pose(pose, reference = None):
 	for id, (bone, pose_matrix, reference_matrix) in enumerate(zip(bones_by_id, pose, reference)):
 		if (parent := bone.parent_id) is not None:
 			pose_matrix = pose[parent].inverted() @ pose_matrix
+			reference_matrix = reference[parent].inverted() @ reference_matrix
 
-		# i have no idea if this is correct pls tell me
 		matrix = pose_matrix @ reference_matrix.inverted()
 
 		translation, rotation, scale = matrix.decompose()
 
-		bones.append(struct.pack('<3f4f3f', *translation, *rotation, *scale))
+		bones.append(struct.pack('<3f4f3f', *translation, rotation.x, rotation.y, rotation.z, rotation.w, *scale))
 
 	return b''.join(bones)
 
@@ -209,7 +209,7 @@ with open(export_path, "wb") as file:
 		else:
 			file.write(struct.pack('<H', bone.parent_id))
 
-		file.write(struct.pack('<16f', *(elem for row in bind_matrix.inverted() for elem in row)))
+		file.write(struct.pack('<16f', *(elem for row in bind_matrix.inverted().transposed() for elem in row)))
 
 	patch_pointer_to_cursor(rest_pose_ptr)
 	file.write(pack_pose(rest_pose, None))
