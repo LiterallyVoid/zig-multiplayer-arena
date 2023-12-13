@@ -32,6 +32,8 @@ pub fn main() !void {
     defer model.deinit(allocator);
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
+        const time: f32 = @floatCast(c.glfwGetTime());
+
         var width: c_int = 0;
         var height: c_int = 0;
 
@@ -47,8 +49,8 @@ pub fn main() !void {
         var matrix = linalg.Mat4.perspective(1.1, @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height)), 0.1, 100.0);
 
         matrix = matrix.multiply(linalg.Mat4.lookAt(
-            linalg.Vec3.new(-2.0, 2.0, 2.0),
             linalg.Vec3.new(0.0, 0.0, 0.0),
+            linalg.Vec3.new(0.0, -1.0, 0.0),
             linalg.Vec3.new(0.0, 0.0, 1.0),
         ));
 
@@ -59,7 +61,11 @@ pub fn main() !void {
         var pose_2 = try model.blankPose(allocator);
         defer pose_2.deinit(allocator);
 
-        pose_1.fromInterpolation(model.framePose(152), model.framePose(153), 0.5);
+        const f1: u32 = @as(u32, @intFromFloat(time * 60.0)) % 160 + 111;
+        const f2 = f1 + 1;
+        const fr = @mod(time * 60.0, 1.0);
+
+        pose_1.fromInterpolation(model.framePose(f1), model.framePose(f2), fr);
         pose_2.fromCopy(model.rest_pose);
 
         pose_2.addLayer(pose_1, 1.0);
