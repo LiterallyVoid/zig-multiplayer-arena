@@ -167,7 +167,7 @@ with open(export_path, "wb") as file:
 		file.write(struct.pack('<B', len(name_bytes)))
 		file.write(name_bytes)
 
-		file.write(struct.pack('<16f', *bind_matrix.inverted()))
+		file.write(struct.pack('<16f', *(elem for row in bind_matrix.inverted() for elem in row)))
 
 	patch_pointer_to_cursor(rest_pose_ptr)
 	file.write(pack_pose(rest_pose, None))
