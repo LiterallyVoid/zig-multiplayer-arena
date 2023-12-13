@@ -54,11 +54,14 @@ def find_bones(object):
 		bones_by_id.append(bone)
 		bones_by_pose_bone[pose_bone] = bone
 
+	armatures.add(object)
+
 	for bone in object.pose.bones:
 		_ = bone_id(bone)
 
-def pack_vertex(position, normal):
-	return struct.pack('<3f3f', *position, *normal)
+def pack_vertex(position, normal, bone_indices, bone_weights):
+	bone_weights = [int(weight * 255) for weight in bone_weights]
+	return struct.pack('<3f3f4B4B', *position, *normal, *bone_indices, *bone_weights)
 
 def export_mesh(object):
 	object = object.evaluated_get(depsgraph)
@@ -68,6 +71,11 @@ def export_mesh(object):
 	mesh.calc_normals_split()
 	mesh.calc_tangents()
 
+	armature = None
+	
+	if object.parent and object.parent.type == 'ARMATURE':
+		armature = object.parent
+
 	for polygon in mesh.polygons:
 		polygon_vertices = []
 
@@ -75,9 +83,33 @@ def export_mesh(object):
 			loop = mesh.loops[loop_index]
 			vertex = mesh.vertices[loop.vertex_index]
 
+			# Placeholder indices and weights.
+			bone_indices_and_weights = [(0, 0.0)] * 4
+
+			for vertex_group in vertex.groups:
+				try:
+					object_group = object.vertex_groups[vertex_group.group]
+				except:
+					continue
+
+				bone = bones_by_pose_bone[armature.pose.bones[object_group.name]]
+				bone_indices_and_weights.append([bone.id, vertex_group.weight])
+
+			bone_indices_and_weights.sort(key = lambda bone: bone[1], reverse = True)
+			bone_indices_and_weights = bone_indices_and_weights[:4]
+
+			bone_indices, bone_weights = zip(*bone_indices_and_weights)
+
+			# Normalize bone weights.
+			total = sum(bone_weights)
+			if total > 0.0:
+				bone_weights = [weight / total for weight in bone_weights]
+
 			polygon_vertices.append(pack_vertex(
 				matrix @ vertex.co,
 				matrix.to_3x3() @ loop.normal,
+				bone_indices,
+				bone_weights,
 			))
 
 		for edge in zip(polygon_vertices[1:], polygon_vertices[2:]):
@@ -102,9 +134,14 @@ def export_scene(scene):
 		frame_poses.append(scene_pose())
 
 	for armature in armatures:
-		armature.pose_position = 'REST'
+		armature.data.pose_position = 'REST'
+
+	# Update the depsgraph, I guess?? lol
+	bpy.context.scene.frame_set(0)
 
 	bind_pose = scene_pose()
+
+	depsgraph.update()
 
 	for object in scene.collection.all_objects:
 		if not object.visible_get(): continue
@@ -116,7 +153,7 @@ bind_pose, frame_poses = export_scene(bpy.context.scene)
 rest_pose = bind_pose
 
 FILE_MAGIC = b"aMdl"
-FILE_VERSION = 2
+FILE_VERSION = 3
 
 def patchable_pointer(file):
 	position = file.tell()

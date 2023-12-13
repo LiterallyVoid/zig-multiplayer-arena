@@ -8,6 +8,8 @@ const Self = @This();
 pub const Vertex = struct {
     position: [3]f32,
     normal: [3]f32,
+    bone_indices: [4]u8,
+    bone_weights: [4]u8,
 };
 
 pub const Bone = struct {
@@ -88,6 +90,25 @@ pub fn upload(self: *Self) void {
         @ptrFromInt(@offsetOf(Vertex, "normal")),
     );
 
+    c.glEnableVertexAttribArray(2);
+    c.glVertexAttribIPointer(
+        2,
+        4,
+        c.GL_UNSIGNED_BYTE,
+        @sizeOf(Vertex),
+        @ptrFromInt(@offsetOf(Vertex, "bone_indices")),
+    );
+
+    c.glEnableVertexAttribArray(3);
+    c.glVertexAttribPointer(
+        3,
+        4,
+        c.GL_UNSIGNED_BYTE,
+        c.GL_TRUE,
+        @sizeOf(Vertex),
+        @ptrFromInt(@offsetOf(Vertex, "bone_weights")),
+    );
+
     c.glBindVertexArray(0);
 }
 
@@ -104,7 +125,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     std.debug.assert(std.mem.eql(u8, &magic, "aMdl"));
 
     const version = try reader.readIntLittle(u32);
-    std.debug.assert(version == 2);
+    std.debug.assert(version == 3);
 
     const vertices_len = try reader.readIntLittle(u32);
     const vertices_pos = try file.getPos() + try reader.readIntLittle(u32);
@@ -130,6 +151,14 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 
         for (&vertex.normal) |*element| {
             element.* = @bitCast(try reader.readIntLittle(u32));
+        }
+
+        for (&vertex.bone_indices) |*element| {
+            element.* = try reader.readIntLittle(u8);
+        }
+
+        for (&vertex.bone_weights) |*element| {
+            element.* = try reader.readIntLittle(u8);
         }
     }
 
