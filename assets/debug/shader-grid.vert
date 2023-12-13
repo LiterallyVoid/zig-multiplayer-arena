@@ -8,8 +8,14 @@ layout (location = 1) in vec3 a_normal;
 layout (location = 2) in ivec4 a_bone_indices;
 layout (location = 3) in vec4 a_bone_weights;
 
+out vec3 v_position_bind;
+out vec3 v_normal_bind;
+
 out vec3 v_position_model;
 out vec3 v_normal_model;
+
+out vec3 v_normal_world;
+
 out vec3 v_barycentric;
 
 void main() {
@@ -22,10 +28,12 @@ void main() {
 
     skeletal_matrix += mat4(1.0) * (1.0 - dot(a_bone_weights, vec4(1.0)));
 
-    v_position_model = a_position.xyz;
-    v_position_model = (skeletal_matrix * vec4(v_position_model, 1.0)).xyz;
+    v_position_bind = a_position.xyz;
+    v_position_model = (skeletal_matrix * vec4(v_position_bind, 1.0)).xyz;
 
-    v_normal_model = a_normal;
+    v_normal_bind = a_normal;
+    v_normal_model = mat3(skeletal_matrix) * v_normal_bind;
+    v_normal_world = mat3(u_matrix) * v_normal_model;
     
     gl_Position = u_matrix * vec4(v_position_model, 1.0);
 

@@ -2,8 +2,14 @@
 
 #include "stdlib.glsl"
 
+in vec3 v_position_bind;
+in vec3 v_normal_bind;
+
 in vec3 v_position_model;
 in vec3 v_normal_model;
+
+in vec3 v_normal_world;
+
 in vec3 v_barycentric;
 
 layout (location = 0) out vec4 f_main;
@@ -43,14 +49,14 @@ float triplanarAxisShare(float axis) {
 void main() {
     f_main = vec4(1.0, 0.5, 0.2, 1.0);
 
-    vec3 grid_axes = gridPlanes(v_position_model);
+    vec3 grid_axes = gridPlanes(v_position_bind);
     vec4 grid_axes_with_w = vec4(grid_axes, 1.0);
 
     vec2 grid = vec2(0.0);
 
-    grid += grid_axes_with_w.xw * triplanarAxisShare(v_normal_model.x);
-    grid += grid_axes_with_w.yw * triplanarAxisShare(v_normal_model.y);
-    grid += grid_axes_with_w.zw * triplanarAxisShare(v_normal_model.z);
+    grid += grid_axes_with_w.xw * triplanarAxisShare(v_normal_bind.x);
+    grid += grid_axes_with_w.yw * triplanarAxisShare(v_normal_bind.y);
+    grid += grid_axes_with_w.zw * triplanarAxisShare(v_normal_bind.z);
 
     vec3 barycentric_pixels = v_barycentric / fwidth(v_barycentric);
     float wireframe = min(barycentric_pixels.x, min(barycentric_pixels.y, barycentric_pixels.z));
