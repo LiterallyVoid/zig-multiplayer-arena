@@ -27,7 +27,7 @@ pub fn main() !void {
     const shader = try Shader.load(allocator, "zig-out/assets/debug/shader-grid");
     defer shader.deinit();
 
-    var model = try Model.load(allocator, "zig-out/assets/debug/cube.model");
+    var model = try Model.load(allocator, "zig-out/assets/x/hand-blender40.model");
     model.upload();
     defer model.deinit(allocator);
 
@@ -47,13 +47,23 @@ pub fn main() !void {
         var matrix = linalg.Mat4.perspective(1.1, @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height)), 0.1, 100.0);
 
         matrix = matrix.multiply(linalg.Mat4.lookAt(
-            linalg.Vec3.new(5.0, 5.0, 5.0),
+            linalg.Vec3.new(2.0, 2.0, 2.0),
             linalg.Vec3.new(0.0, 0.0, 0.0),
             linalg.Vec3.new(0.0, 0.0, 1.0),
         ));
 
+        // TODO: use an arena allocator here
+        var pose = try model.blankPose(allocator);
+        defer pose.deinit(allocator);
+
+        pose.fromInterpolation(model.framePose(120), model.framePose(121), 0.5);
+
+        const bone_matrices = try model.poseMatrices(allocator, pose);
+        defer allocator.free(bone_matrices);
+
         shader.bindWithUniforms(.{
             .u_matrix = matrix,
+            .u_bone_matrices = bone_matrices,
         });
         model.draw();
 

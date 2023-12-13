@@ -1,3 +1,5 @@
+// TODO: split models and animations?
+
 const std = @import("std");
 const c = @import("./c.zig");
 
@@ -30,6 +32,14 @@ pub const Pose = struct {
 
     pub fn deinit(self: Pose, allocator: std.mem.Allocator) void {
         allocator.free(self.bones);
+    }
+
+    pub fn fromInterpolation(self: *Pose, a: Pose, b: Pose, ratio: f32) void {
+        for (self.bones, a.bones, b.bones) |*self_bone, a_bone, b_bone| {
+            self_bone.translation = a_bone.translation.mix(b_bone.translation, ratio);
+            self_bone.rotation = a_bone.rotation.slerp(b_bone.rotation, ratio);
+            self_bone.scale = a_bone.scale.mix(b_bone.scale, ratio);
+        }
     }
 };
 
@@ -117,6 +127,41 @@ pub fn upload(self: *Self) void {
 pub fn draw(self: Self) void {
     c.glBindVertexArray(self.gl_vao);
     c.glDrawArrays(c.GL_TRIANGLES, 0, @intCast(self.vertices_count));
+}
+
+/// Create a new pose that can be modified. The returned pose must be freed by the caller.
+pub fn blankPose(self: Self, allocator: std.mem.Allocator) !Pose {
+    return .{
+        .bones = try allocator.alloc(BonePose, self.bones.len),
+    };
+}
+
+/// Return a reference to this model's pose on frame `frame`.
+pub fn framePose(self: Self, frame: usize) Pose {
+    return self.frames[frame];
+}
+
+/// Convert a pose to a list of matrices, to be used by skeletal animation shaders.
+pub fn poseMatrices(self: Self, allocator: std.mem.Allocator, pose: Pose) ![]linalg.Mat4 {
+    const matrices = try allocator.alloc(linalg.Mat4, self.bones.len);
+
+    for (matrices, self.bones, pose.bones) |*matrix, bone, pose_bone| {
+        var matrix_local = linalg.Mat4.translationVector(pose_bone.translation);
+        matrix_local = matrix_local.multiply(pose_bone.rotation.toMatrix().toMat4());
+        matrix_local = matrix_local.multiply(linalg.Mat4.scaleVec(pose_bone.scale));
+
+        if (bone.parent) |parent_id| {
+            matrix.* = matrix_local.multiply(matrices[parent_id]);
+        } else {
+            matrix.* = matrix_local;
+        }
+    }
+
+    for (matrices, self.bones) |*matrix, bone| {
+        matrix.* = matrix.*.multiply(bone.bind_pose_inverse);
+    }
+
+    return matrices;
 }
 
 pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
