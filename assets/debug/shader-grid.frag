@@ -58,4 +58,8 @@ void main() {
 
     f_main.xyz *= (grid.x / grid.y) * 0.3 + 0.7;
     f_main.xyz = mix(f_main.xyz, vec3(1.0, 0.0, 0.0), wireframe * 0.3);
+
+    vec3 sun = vec3(3.0, 14.0, 18.0) / 23.0;
+
+    f_main.xyz *= dot(v_normal_world, sun) * 0.5 + 0.5;
 }
