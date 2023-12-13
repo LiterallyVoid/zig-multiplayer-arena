@@ -442,7 +442,7 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
 
         pub fn multiplyVectorOpp(self: Self, vec: Vec) Vec {
             var v = Vec.zero();
-            inline for (v.data, 0..) |*el, i| {
+            inline for (&v.data, 0..) |*el, i| {
                 comptime var j = 0;
                 inline while (j < dim) : (j += 1) {
                     el.* += self.data[i][j] * vec.data[j];
