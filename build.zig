@@ -123,5 +123,5 @@ pub fn build(b: *std.build.Builder) !void {
     const assets_step = b.step("assets", "Build assets");
     try buildAssets(b, assets_step);
 
-    command_run.dependOn(assets_step);
+    run_exe.step.dependOn(assets_step);
 }
