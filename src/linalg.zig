@@ -538,7 +538,7 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
 
         pub fn transpose(self: Self) Self {
             var mat = Self.zero();
-            inline for (mat.data, 0..) |*row, x| {
+            inline for (&mat.data, 0..) |*row, x| {
                 inline for (row, 0..) |*elem, y| {
                     elem.* = self.data[y][x];
                 }
@@ -674,6 +674,12 @@ pub const Quaternion = struct {
         var s1 = sin / sin_0;
 
         return self_n.mulScalar(s0).add(other_n.mulScalar(s1));
+    }
+
+    pub fn inverse(self: Self) Self {
+        return .{
+            .data = .{ self.data[0], self.data[1], self.data[2], -self.data[3] },
+        };
     }
 
     fn square(num: f32) f32 {
