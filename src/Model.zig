@@ -54,13 +54,16 @@ pub const Pose = struct {
                 .identity()
                 .slerp(layer_bone.rotation, weight);
 
+            const scale = linalg.Vec3.new(1.0, 1.0, 1.0).mix(layer_bone.scale, weight);
+
             self_bone.translation = rotation.mulVector(self_bone.translation)
+                .mul(scale)
                 .add(layer_bone.translation.mulScalar(weight));
 
             self_bone.rotation = rotation.mul(self_bone.rotation);
 
             self_bone.scale = self_bone.scale
-                .mul(linalg.Vec3.new(1.0, 1.0, 1.0).mix(layer_bone.scale, weight));
+                .mul(scale);
         }
     }
 };
