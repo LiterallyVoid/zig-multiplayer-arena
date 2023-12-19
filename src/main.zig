@@ -5,6 +5,65 @@ pub const linalg = @import("./linalg.zig");
 pub const Shader = @import("./Shader.zig");
 pub const Model = @import("./Model.zig");
 
+pub const DebugRenderer = struct {
+    pub const Space = enum {
+        world,
+        viewmodel,
+        ui,
+
+        pub const max_enum = std.meta.fields(Space).len;
+    };
+
+    pub const Object = struct {
+        space: Space,
+
+        model: *Model,
+        model_matrix: linalg.Mat4,
+
+        shader: *Shader,
+        color: [4]f32,
+    };
+
+    projectionview_matrices: [Space.max_enum]linalg.Mat4 = undefined,
+
+    objects: [8192]Object = undefined,
+    last_object_id: usize = 0,
+
+    objects_over_limit: usize = 0,
+
+    pub fn addObject(self: *DebugRenderer, object: Object) void {
+        if (self.last_object_id >= self.objects.len) {
+            self.objects_over_limit += 1;
+            return;
+        }
+
+        self.objects[self.last_object_id] = object;
+        self.last_object_id += 1;
+    }
+
+    pub fn flush(self: *DebugRenderer) void {
+        if (self.objects_over_limit > 0) {
+            std.log.err(
+                "debug renderer: rendering {} objects over limit of {}",
+                .{ self.objects_over_limit, self.objects.len },
+            );
+        }
+
+        for (self.objects[0..self.last_object_id]) |object| {
+            object.shader.bindWithUniforms(.{
+                .u_matrix_projectionview = self.projectionview_matrices[@intFromEnum(object.space)],
+                .u_matrix_model = object.model_matrix,
+                .u_color = object.color,
+            });
+            object.model.draw();
+        }
+
+        self.last_object_id = 0;
+    }
+};
+
+pub var dr = DebugRenderer{};
+
 pub const ActionId = enum {
     forward,
     back,
@@ -289,6 +348,13 @@ pub fn main() !void {
             });
             model.draw();
         }
+
+        dr.projectionview_matrices = .{
+            matrix_projectionview,
+            matrix_viewmodel_projectionview,
+            undefined,
+        };
+        dr.flush();
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
