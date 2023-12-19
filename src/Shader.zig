@@ -19,6 +19,8 @@ fn reportInfoLog(
     var length: c.GLint = 0;
     getInfo.?(name, 1024, &length, &log);
 
+    if (length == 0) return;
+
     std.log.err("{s} log: {s}", .{
         label,
         log[0..@intCast(length)],
