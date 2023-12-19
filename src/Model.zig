@@ -171,7 +171,7 @@ pub fn poseMatrices(self: Self, allocator: std.mem.Allocator, pose: Pose) ![]lin
     const matrices = try allocator.alloc(linalg.Mat4, self.bones.len);
 
     for (matrices, self.bones, pose.bones) |*matrix, bone, pose_bone| {
-        var matrix_local = linalg.Mat4.translationVector(pose_bone.translation);
+        var matrix_local = linalg.Mat4.translationVec(pose_bone.translation);
         matrix_local = matrix_local.multiply(pose_bone.rotation.toMatrix().toMat4());
         matrix_local = matrix_local.multiply(linalg.Mat4.scaleVec(pose_bone.scale));
 

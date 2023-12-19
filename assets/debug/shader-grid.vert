@@ -1,6 +1,7 @@
 #version 330 core
 
-uniform mat4 u_matrix;
+uniform mat4 u_matrix_model;
+uniform mat4 u_matrix_projectionview;
 uniform mat4 u_bone_matrices[64];
 
 layout (location = 0) in vec4 a_position;
@@ -33,9 +34,10 @@ void main() {
 
     v_normal_bind = a_normal;
     v_normal_model = mat3(skeletal_matrix) * v_normal_bind;
-    v_normal_world = mat3(u_matrix) * v_normal_model;
+
+    v_normal_world = mat3(u_matrix_model) * v_normal_model;
     
-    gl_Position = u_matrix * vec4(v_position_model, 1.0);
+    gl_Position = u_matrix_projectionview * u_matrix_model * vec4(v_position_model, 1.0);
 
     v_barycentric = vec3(0.0);
     if (gl_VertexID % 3 == 0) {
