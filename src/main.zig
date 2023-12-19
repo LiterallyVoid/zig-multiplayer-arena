@@ -65,12 +65,20 @@ pub const DebugRenderer = struct {
 pub var dr = DebugRenderer{};
 
 pub const ActionId = enum {
+    attack1,
+    attack2,
+
     forward,
     back,
     left,
     right,
     jump,
     crouch,
+
+    fly_fast,
+    fly_slow,
+
+    pub const max_enum = std.meta.fields(ActionId).len;
 };
 
 pub const Event = union(enum) {
@@ -92,17 +100,27 @@ pub const Flycam = struct {
     angle: [2]f32 = .{ 0.0, 0.0 },
 
     actions: [6]f32 = .{0.0} ** 6,
+    fast: bool = false,
+    slow: bool = false,
 
     pub fn update(self: *Flycam, delta: f32) void {
         const basis = self.calculateBasis();
 
         const forward = basis.multiplyVectorOpp(linalg.Vec3.new(1.0, 0.0, 0.0));
         const right = basis.multiplyVectorOpp(linalg.Vec3.new(0.0, 1.0, 0.0));
-        const up = basis.multiplyVectorOpp(linalg.Vec3.new(0.0, 0.0, 1.0));
+        const up = linalg.Vec3.new(0.0, 0.0, 1.0);
 
         self.velocity = self.velocity.mulScalar(std.math.exp(-delta * 20.0));
 
-        const speed = 250.0;
+        var speed: f32 = 250.0;
+
+        if (self.fast) {
+            speed *= 10.0;
+        }
+
+        if (self.slow) {
+            speed /= 3.0;
+        }
 
         self.velocity = self.velocity.add(forward.mulScalar(delta * speed * (self.actions[0] - self.actions[1])));
         self.velocity = self.velocity.add(right.mulScalar(delta * speed * (self.actions[2] - self.actions[3])));
@@ -141,7 +159,14 @@ pub const Flycam = struct {
                     .right => self.actions[3] = action.value,
                     .jump => self.actions[4] = action.value,
                     .crouch => self.actions[5] = action.value,
+
+                    .fly_fast => self.fast = action.pressed,
+                    .fly_slow => self.slow = action.pressed,
+
+                    else => return false,
                 }
+
+                return true;
             },
         }
 
@@ -172,14 +197,31 @@ pub const EventTranslator = struct {
 };
 
 pub const App = struct {
+    allocator: std.mem.Allocator,
+
     event_translator: EventTranslator = .{},
     flycam: Flycam = .{},
+
+    actions: [ActionId.max_enum]f32 = .{0.0} ** ActionId.max_enum,
+
+    pub fn init(allocator: std.mem.Allocator) !App {
+        return App{
+            .allocator = allocator,
+        };
+    }
 
     pub fn update(self: *App, delta: f32) void {
         self.flycam.update(delta);
     }
 
     pub fn handleEvent(self: *App, event: Event) bool {
+        switch (event) {
+            .action => |action| {
+                self.actions[@intFromEnum(action.id)] = action.value;
+            },
+
+            else => {},
+        }
         if (self.flycam.handleEvent(event)) return true;
 
         return false;
@@ -192,6 +234,31 @@ pub const App = struct {
         _ = self.handleEvent(event);
     }
 
+    // TODO: Actions aren't combined
+    pub fn glfw_mouseButtonCallback(window: ?*c.GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
+        _ = mods;
+        const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
+
+        const action_id: ActionId = switch (button) {
+            c.GLFW_MOUSE_BUTTON_LEFT => .attack1,
+            c.GLFW_MOUSE_BUTTON_RIGHT => .attack2,
+            else => return,
+        };
+
+        const pressed = action == c.GLFW_PRESS;
+
+        const event = Event{
+            .action = .{
+                .id = action_id,
+                .pressed = pressed,
+                .value = if (pressed) 1.0 else 0.0,
+            },
+        };
+
+        _ = self.handleEvent(event);
+    }
+
+    // TODO: Actions aren't combined
     pub fn glfw_keyCallback(window: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
         _ = scancode;
         _ = mods;
@@ -205,6 +272,12 @@ pub const App = struct {
             c.GLFW_KEY_F => .right,
             c.GLFW_KEY_SPACE => .jump,
             c.GLFW_KEY_LEFT_SHIFT => .crouch,
+
+            c.GLFW_KEY_LEFT_CONTROL,
+            c.GLFW_KEY_CAPS_LOCK,
+            => .fly_fast,
+
+            c.GLFW_KEY_LEFT_ALT => .fly_slow,
             else => return,
         };
 
@@ -235,10 +308,11 @@ pub fn main() !void {
 
     c.glfwMakeContextCurrent(window);
 
-    var app = App{};
+    var app = try App.init(allocator);
 
     c.glfwSetWindowUserPointer(window, &app);
     _ = c.glfwSetCursorPosCallback(window, App.glfw_cursorPosCallback);
+    _ = c.glfwSetMouseButtonCallback(window, App.glfw_mouseButtonCallback);
     _ = c.glfwSetKeyCallback(window, App.glfw_keyCallback);
 
     const gl_version = c.gladLoadGL(c.glfwGetProcAddress);
@@ -321,7 +395,7 @@ pub fn main() !void {
         }
 
         // TODO: use an arena allocator here
-        if (true) {
+        if (false) {
             var pose_1 = try model.blankPose(allocator);
             defer pose_1.deinit(allocator);
 
