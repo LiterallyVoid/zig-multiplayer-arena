@@ -68,7 +68,9 @@ def export_mesh(object):
 	matrix = object.matrix_world
 	mesh = object.data
 
-	mesh.calc_normals_split()
+	if hasattr(mesh, "calc_normals_split"):
+		mesh.calc_normals_split()
+
 	mesh.calc_tangents()
 
 	armature = None
