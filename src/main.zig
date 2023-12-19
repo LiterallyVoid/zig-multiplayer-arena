@@ -31,6 +31,14 @@ pub const DebugRenderer = struct {
 
     objects_over_limit: usize = 0,
 
+    resources: struct {
+        model_cube: Model,
+        model_cylinder: Model,
+        model_cone: Model,
+
+        shader_flat: Shader,
+    } = undefined,
+
     pub fn addObject(self: *DebugRenderer, object: Object) void {
         if (self.last_object_id >= self.objects.len) {
             self.objects_over_limit += 1;
@@ -335,6 +343,15 @@ pub fn main() !void {
     c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
 
     var previous_time: f64 = 0.0;
+
+    dr.resources.model_cube = try Model.load(allocator, "zig-out/assets/debug/cube.model");
+    defer dr.resources.model_cube.deinit(allocator);
+    dr.resources.model_cylinder = try Model.load(allocator, "zig-out/assets/debug/cylinder.model");
+    defer dr.resources.model_cylinder.deinit(allocator);
+    dr.resources.model_cone = try Model.load(allocator, "zig-out/assets/debug/cone.model");
+    defer dr.resources.model_cone.deinit(allocator);
+    dr.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
+    defer dr.resources.shader_flat.deinit();
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
