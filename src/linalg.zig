@@ -459,7 +459,7 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
             return mat;
         }
 
-        pub fn translationVector(vec: Vec3) Self {
+        pub fn translationVec(vec: Vec3) Self {
             var mat = Self.identity();
             mat.data[3][0] = vec.data[0];
             mat.data[3][1] = vec.data[1];
