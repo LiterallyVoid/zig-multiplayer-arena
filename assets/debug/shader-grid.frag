@@ -67,9 +67,11 @@ void main() {
 
     vec3 sun = vec3(3.0, 14.0, 18.0) / 23.0;
 
+    vec3 normal = normalize(v_normal_world);
+
     if (!gl_FrontFacing) {
-        sun *= -1.0;
+        normal *= -1.0;
     }
 
-    f_main.xyz *= dot(v_normal_world, sun) * 0.5 + 0.5;
+    f_main.xyz *= dot(normal, sun) * 0.5 + 0.5;
 }

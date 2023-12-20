@@ -19,5 +19,5 @@ void main() {
 
     f_main = u_color;
     f_main.xyz *= dot(normal, sun) * 0.5 + 0.5;
-    f_main.xyz = normal * 0.5 + 0.5;
+    // f_main.xyz = normal * 0.5 + 0.5;
 }

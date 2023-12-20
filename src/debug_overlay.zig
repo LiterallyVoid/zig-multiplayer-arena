@@ -16,10 +16,10 @@ pub const DebugOverlay = struct {
     pub const Object = struct {
         space: Space,
 
-        model: *Model,
+        model: *const Model,
         model_matrix: linalg.Mat4,
 
-        shader: *Shader,
+        shader: *const Shader,
         color: [4]f32,
     };
 

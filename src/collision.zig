@@ -53,8 +53,8 @@ pub const BrushModel = struct {
             brush.first_plane = @intCast(planes.items.len);
             defer brush.planes_count = @intCast(planes.items.len - brush.first_plane);
 
-            const bext = vertex_positions[2].sub(vertex_positions[0])
-                .cross(vertex_positions[1].sub(vertex_positions[0]));
+            const bext = vertex_positions[1].sub(vertex_positions[0])
+                .cross(vertex_positions[2].sub(vertex_positions[0]));
 
             // Don't ask why it has to be halved, I don't know either. But it works, and at the end of the day that's all I can ask.
             const area = bext.length() / 2.0;
@@ -79,7 +79,7 @@ pub const BrushModel = struct {
 
                 const edge = v2.sub(v1);
 
-                const out = up.cross(edge).normalized();
+                const out = edge.cross(up).normalized();
                 try planes.append(.{
                     .vec = out.xyzw(-out.dot(v1)),
                     .origin = v1.add(v2).divScalar(2.0),
@@ -115,13 +115,17 @@ pub const BrushModel = struct {
 
     pub fn debug(self: BrushModel) void {
         for (self.brushes) |brush| {
-            for (self.planes[brush.first_plane..][0..brush.planes_count]) |plane| {
+            for (self.planes[brush.first_plane..][0..brush.planes_count], 0..) |plane, i| {
+                var color: [4]f32 = if (i == 0)
+                    .{ 1.0, 0.3, 0.3, 1.0 }
+                else
+                    .{ 1.0, 0.0, 0.0, 1.0 };
                 std.debug.assert(@fabs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
                 do.arrow(
                     .world,
                     plane.origin,
                     plane.vec.xyz(),
-                    .{ 0.2, 0.2, 1.0, 1.0 },
+                    color,
                 );
             }
         }

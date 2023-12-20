@@ -298,6 +298,8 @@ pub fn main() !void {
     do.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
     defer do.resources.shader_flat.deinit();
 
+    // c.glEnable(c.GL_CULL_FACE);
+
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
         var delta: f32 = @floatCast(time - previous_time);
@@ -350,11 +352,20 @@ pub fn main() !void {
             shader.bindWithUniforms(.{
                 .u_matrix_projectionview = matrix_projectionview,
                 .u_matrix_model = linalg.Mat4.identity(),
+                .u_matrix_model_normal = linalg.Mat3.identity(),
             });
             map.draw();
 
             break :map {};
         }
+
+        // do.addObject(.{
+        //     .space = .world,
+        //     .model = &map,
+        //     .model_matrix = linalg.Mat4.identity(),
+        //     .shader = &shader,
+        //     .color = .{ 1.0, 0.0, 0.0, 1.0 },
+        // });
 
         // TODO: use an arena allocator here
         if (false) {
@@ -380,6 +391,7 @@ pub fn main() !void {
             shader.bindWithUniforms(.{
                 .u_matrix_projectionview = matrix_viewmodel_projectionview,
                 .u_matrix_model = matrix_camera,
+                .u_matrix_model_normal = matrix_camera.toMat3(),
                 .u_bone_matrices = bone_matrices,
             });
             model.draw();

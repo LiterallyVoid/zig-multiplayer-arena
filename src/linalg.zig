@@ -542,9 +542,10 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
             var newUp = side.cross(forward).normalized();
 
             var mat = Self.identity();
-            mat.data[0][0] = side.data[0];
-            mat.data[0][1] = side.data[1];
-            mat.data[0][2] = side.data[2];
+            // invert or something idk im not an expert
+            mat.data[0][0] = -side.data[0];
+            mat.data[0][1] = -side.data[1];
+            mat.data[0][2] = -side.data[2];
 
             mat.data[1][0] = newUp.data[0];
             mat.data[1][1] = newUp.data[1];
