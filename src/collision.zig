@@ -4,7 +4,7 @@ const Model = @import("./Model.zig");
 
 const do = &@import("./debug_overlay.zig").singleton;
 
-const DUPE_PLANE_EPSILON = 1e-12;
+const DUPE_PLANE_EPSILON = 1e-3;
 
 pub const Impact = struct {
     time: f32,
