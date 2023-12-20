@@ -4,73 +4,9 @@ const c = @import("./c.zig");
 pub const linalg = @import("./linalg.zig");
 pub const Shader = @import("./Shader.zig");
 pub const Model = @import("./Model.zig");
-
-pub const DebugRenderer = struct {
-    pub const Space = enum {
-        world,
-        viewmodel,
-        ui,
-
-        pub const max_enum = std.meta.fields(Space).len;
-    };
-
-    pub const Object = struct {
-        space: Space,
-
-        model: *Model,
-        model_matrix: linalg.Mat4,
-
-        shader: *Shader,
-        color: [4]f32,
-    };
-
-    projectionview_matrices: [Space.max_enum]linalg.Mat4 = undefined,
-
-    objects: [8192]Object = undefined,
-    last_object_id: usize = 0,
-
-    objects_over_limit: usize = 0,
-
-    resources: struct {
-        model_cube: Model,
-        model_cylinder: Model,
-        model_cone: Model,
-
-        shader_flat: Shader,
-    } = undefined,
-
-    pub fn addObject(self: *DebugRenderer, object: Object) void {
-        if (self.last_object_id >= self.objects.len) {
-            self.objects_over_limit += 1;
-            return;
-        }
-
-        self.objects[self.last_object_id] = object;
-        self.last_object_id += 1;
-    }
-
-    pub fn flush(self: *DebugRenderer) void {
-        if (self.objects_over_limit > 0) {
-            std.log.err(
-                "debug renderer: rendering {} objects over limit of {}",
-                .{ self.objects_over_limit, self.objects.len },
-            );
-        }
-
-        for (self.objects[0..self.last_object_id]) |object| {
-            object.shader.bindWithUniforms(.{
-                .u_matrix_projectionview = self.projectionview_matrices[@intFromEnum(object.space)],
-                .u_matrix_model = object.model_matrix,
-                .u_color = object.color,
-            });
-            object.model.draw();
-        }
-
-        self.last_object_id = 0;
-    }
-};
-
-pub var dr = DebugRenderer{};
+pub const collision = @import("./collision.zig");
+pub const debug_overlay = @import("./debug_overlay.zig");
+const do = &debug_overlay.singleton;
 
 pub const ActionId = enum {
     attack1,
@@ -336,6 +272,9 @@ pub fn main() !void {
     map.upload();
     defer map.deinit(allocator);
 
+    var map_bmodel = try collision.BrushModel.fromModelVertices(allocator, map.vertices);
+    defer map_bmodel.deinit(allocator);
+
     var model = try Model.load(allocator, "zig-out/assets/x/hand.model");
     model.upload();
     defer model.deinit(allocator);
@@ -344,14 +283,20 @@ pub fn main() !void {
 
     var previous_time: f64 = 0.0;
 
-    dr.resources.model_cube = try Model.load(allocator, "zig-out/assets/debug/cube.model");
-    defer dr.resources.model_cube.deinit(allocator);
-    dr.resources.model_cylinder = try Model.load(allocator, "zig-out/assets/debug/cylinder.model");
-    defer dr.resources.model_cylinder.deinit(allocator);
-    dr.resources.model_cone = try Model.load(allocator, "zig-out/assets/debug/cone.model");
-    defer dr.resources.model_cone.deinit(allocator);
-    dr.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
-    defer dr.resources.shader_flat.deinit();
+    do.resources.model_cube = try Model.load(allocator, "zig-out/assets/debug/cube.model");
+    defer do.resources.model_cube.deinit(allocator);
+    do.resources.model_cube.upload();
+
+    do.resources.model_cylinder = try Model.load(allocator, "zig-out/assets/debug/cylinder.model");
+    defer do.resources.model_cylinder.deinit(allocator);
+    do.resources.model_cylinder.upload();
+
+    do.resources.model_cone = try Model.load(allocator, "zig-out/assets/debug/cone.model");
+    defer do.resources.model_cone.deinit(allocator);
+    do.resources.model_cone.upload();
+
+    do.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
+    defer do.resources.shader_flat.deinit();
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
@@ -365,7 +310,7 @@ pub fn main() !void {
 
         c.glViewport(0, 0, width, height);
 
-        c.glClearColor(0.2, 0.5, 1.0, 1.0);
+        c.glClearColor(0.2, 0.2, 0.2, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
         c.glEnable(c.GL_DEPTH_TEST);
@@ -440,12 +385,14 @@ pub fn main() !void {
             model.draw();
         }
 
-        dr.projectionview_matrices = .{
+        map_bmodel.debug();
+
+        do.projectionview_matrices = .{
             matrix_projectionview,
             matrix_viewmodel_projectionview,
             undefined,
         };
-        dr.flush();
+        do.flush();
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();

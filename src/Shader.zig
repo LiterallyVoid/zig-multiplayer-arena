@@ -76,6 +76,7 @@ pub fn bindWithUniforms(self: Self, uniforms: anytype) void {
         switch (@TypeOf(value)) {
             f32 => c.glUniform1f(location, value),
             [4]f32 => c.glUniform4fv(location, 1, &value[0]),
+            linalg.Mat3 => c.glUniformMatrix3fv(location, 1, c.GL_FALSE, @ptrCast(&value)),
             linalg.Mat4 => c.glUniformMatrix4fv(location, 1, c.GL_FALSE, @ptrCast(&value)),
             []linalg.Mat4 => c.glUniformMatrix4fv(location, @intCast(value.len), c.GL_FALSE, @ptrCast(value)),
             else => @compileError("unknown uniform type: " ++ @typeName(@TypeOf(value))),
