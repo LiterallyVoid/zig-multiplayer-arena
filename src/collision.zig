@@ -4,6 +4,8 @@ const Model = @import("./Model.zig");
 
 const do = &@import("./debug_overlay.zig").singleton;
 
+const DUPE_PLANE_EPSILON = 1e-12;
+
 pub const Impact = struct {
     time: f32,
 
@@ -103,6 +105,16 @@ pub const BrushModel = struct {
                 });
             }
             brush.planes_count_no_bevels = @intCast(planes.items.len - brush.first_plane);
+
+            for (0..3) |axis| {
+                for (0..2) |negated| {
+                    var cardinal = linalg.Vec3.zero();
+                    cardinal.data[axis] = if (negated == 1) -1.0 else 1.0;
+
+                    try addCardinalBevelPlane(brush.first_plane, &planes, vertex_positions, cardinal);
+                    try addCardinalEdgesBevelPlanes(brush.first_plane, &planes, vertex_positions, cardinal);
+                }
+            }
         }
 
         const planes_slice = try planes.toOwnedSlice();
@@ -111,6 +123,61 @@ pub const BrushModel = struct {
             .planes = planes_slice,
             .brushes = brushes,
         };
+    }
+
+    fn addCardinalBevelPlane(
+        first_plane: u32,
+        planes: *std.ArrayList(Plane),
+        triangle: [3]linalg.Vec3,
+        direction: linalg.Vec3,
+    ) !void {
+        for (planes.items[first_plane..]) |plane|
+            if (plane.vec.xyz().dot(direction) > 1.0 - DUPE_PLANE_EPSILON) return;
+
+        var max_distance = -std.math.inf(f32);
+        var origin: linalg.Vec3 = undefined;
+
+        for (triangle) |vertex| {
+            var distance = vertex.dot(direction);
+            if (distance < max_distance) continue;
+
+            max_distance = distance;
+            origin = vertex;
+        }
+
+        try planes.append(.{
+            .vec = direction.xyzw(-max_distance),
+            .origin = origin,
+        });
+    }
+
+    pub fn addCardinalEdgesBevelPlanes(
+        first_plane: u32,
+        planes: *std.ArrayList(Plane),
+        triangle: [3]linalg.Vec3,
+        direction: linalg.Vec3,
+    ) !void {
+        edges: for (0..3) |i| {
+            const vertex_1 = triangle[i];
+            const vertex_2 = triangle[(i + 1) % 3];
+            const opposing = triangle[(i + 2) % 3];
+
+            const edge = vertex_2.sub(vertex_1);
+
+            const bevel_plane = direction.cross(edge).normalized();
+
+            for (planes.items[first_plane..]) |existing_plane|
+                if (existing_plane.vec.xyz().dot(bevel_plane) > 1.0 - DUPE_PLANE_EPSILON) continue :edges;
+
+            const distance = vertex_1.dot(bevel_plane);
+
+            if (opposing.dot(bevel_plane) > distance) continue;
+
+            try planes.append(.{
+                .vec = bevel_plane.xyzw(-distance),
+                .origin = vertex_1.add(vertex_2).mulScalar(0.5),
+            });
+        }
     }
 
     pub fn deinit(self: BrushModel, allocator: std.mem.Allocator) void {
