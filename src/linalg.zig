@@ -536,6 +536,30 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
             return mat;
         }
 
+        pub fn targetTo(origin: Vec3, direction: Vec3, up: Vec3) Self {
+            var forward = direction.normalized();
+            var side = forward.cross(up).normalized();
+            var newUp = side.cross(forward).normalized();
+
+            var mat = Self.identity();
+            mat.data[0][0] = side.data[0];
+            mat.data[0][1] = side.data[1];
+            mat.data[0][2] = side.data[2];
+
+            mat.data[1][0] = newUp.data[0];
+            mat.data[1][1] = newUp.data[1];
+            mat.data[1][2] = newUp.data[2];
+
+            mat.data[2][0] = forward.data[0];
+            mat.data[2][1] = forward.data[1];
+            mat.data[2][2] = forward.data[2];
+
+            mat.data[3][0] = origin.data[0];
+            mat.data[3][1] = origin.data[1];
+            mat.data[3][2] = origin.data[2];
+            return mat;
+        }
+
         pub fn transpose(self: Self) Self {
             var mat = Self.zero();
             inline for (&mat.data, 0..) |*row, x| {
