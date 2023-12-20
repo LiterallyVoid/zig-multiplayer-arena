@@ -779,9 +779,9 @@ pub const Mat4 = struct {
     pub fn toMat3(self: @This()) Mat3 {
         return Mat3{
             .data = [_][3]f32{
-                [_]f32{ self.data[0][0], self.data[1][0], self.data[2][0] },
-                [_]f32{ self.data[0][1], self.data[1][1], self.data[2][1] },
-                [_]f32{ self.data[0][2], self.data[1][2], self.data[2][2] },
+                [_]f32{ self.data[0][0], self.data[0][1], self.data[0][2] },
+                [_]f32{ self.data[1][0], self.data[1][1], self.data[1][2] },
+                [_]f32{ self.data[2][0], self.data[2][1], self.data[2][2] },
             },
         };
     }
