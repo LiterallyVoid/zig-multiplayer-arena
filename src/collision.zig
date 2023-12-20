@@ -150,7 +150,7 @@ pub const BrushModel = struct {
                 }
             }
 
-            if (entrance < exit + 1e-6) {
+            if (entrance < exit + 1e-6 and entrance > -1e-6) {
                 if (nearest_impact) |last_impact| {
                     if (last_impact.time < entrance) continue :brushes;
                 }
