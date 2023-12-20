@@ -6,7 +6,9 @@ const do = &@import("./debug_overlay.zig").singleton;
 
 pub const Impact = struct {
     time: f32,
-    normal: linalg.Vec3,
+
+    brush: Brush,
+    plane: Plane,
 };
 
 pub const Plane = struct {
@@ -21,9 +23,23 @@ pub const Brush = struct {
     first_plane: u32,
 
     planes_count: u32,
+    planes_count_no_bevels: u32,
 
     /// For debugging.
     origin: linalg.Vec3,
+
+    pub fn debug(self: Brush, bmodel: BrushModel) void {
+        for (bmodel.planes[self.first_plane..][0..self.planes_count]) |plane| {
+            var color: [4]f32 = .{ 1.0, 0.3, 0.2, 1.0 };
+            std.debug.assert(@fabs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
+            do.arrow(
+                .world,
+                plane.origin,
+                plane.vec.xyz(),
+                color,
+            );
+        }
+    }
 };
 
 pub const BrushModel = struct {
@@ -51,6 +67,7 @@ pub const BrushModel = struct {
                 .divScalar(3.0);
 
             brush.first_plane = @intCast(planes.items.len);
+            brush.planes_count_no_bevels = 0;
             defer brush.planes_count = @intCast(planes.items.len - brush.first_plane);
 
             const bext = vertex_positions[1].sub(vertex_positions[0])
@@ -85,6 +102,7 @@ pub const BrushModel = struct {
                     .origin = v1.add(v2).divScalar(2.0),
                 });
             }
+            brush.planes_count_no_bevels = @intCast(planes.items.len - brush.first_plane);
         }
 
         const planes_slice = try planes.toOwnedSlice();
@@ -100,34 +118,64 @@ pub const BrushModel = struct {
         allocator.free(self.brushes);
     }
 
-    pub fn traceRay(self: BrushModel, origin: linalg.Vec3, distance: linalg.Vec3) Impact {
-        const origin4 = origin.swizzle(linalg.Vec4, "xyz1");
-        const distance4 = distance.swizzle(linalg.Vec4, "xyz0");
-        _ = distance4;
-        _ = origin4;
+    pub inline fn trace(self: BrushModel, comptime bevel_planes: bool, origin: linalg.Vec3, direction: linalg.Vec3, half_extents: linalg.Vec3) ?Impact {
+        const origin4 = origin.xyzw(1.0);
+        const distance4 = direction.xyzw(0.0);
 
-        for (self.brushes) |brush| {
-            for (brush.planes) |plane| {
-                _ = plane;
+        var nearest_impact: ?Impact = null;
+
+        brushes: for (self.brushes) |brush| {
+            var entrance: f32 = -1.0;
+            var entrance_plane: Plane = undefined;
+
+            var exit: f32 = 2.0;
+
+            const planes_count = if (bevel_planes) brush.planes_count else brush.planes_count_no_bevels;
+
+            for (self.planes[brush.first_plane..][0..planes_count]) |plane| {
+                const distance = plane.vec.dot(origin4) - plane.vec.xyz().abs().dot(half_extents);
+                const slope = plane.vec.dot(distance4);
+
+                const time = distance / -slope;
+
+                if (slope < 0.0) {
+                    if (time > entrance) {
+                        entrance = time;
+                        entrance_plane = plane;
+                    }
+                } else if (slope > 0.0) {
+                    exit = @min(exit, time);
+                } else {
+                    if (distance > 0.0) continue :brushes;
+                }
+            }
+
+            if (entrance < exit + 1e-6) {
+                if (nearest_impact) |last_impact| {
+                    if (last_impact.time < entrance) continue :brushes;
+                }
+                nearest_impact = Impact{
+                    .time = entrance,
+                    .brush = brush,
+                    .plane = entrance_plane,
+                };
             }
         }
+
+        return nearest_impact;
+    }
+
+    pub fn traceRay(self: BrushModel, origin: linalg.Vec3, direction: linalg.Vec3) ?Impact {
+        return self.trace(false, origin, direction, linalg.Vec3.zero());
+    }
+
+    pub fn traceBox(self: BrushModel, origin: linalg.Vec3, direction: linalg.Vec3, half_extents: linalg.Vec3) ?Impact {
+        return self.trace(true, origin, direction, half_extents);
     }
 
     pub fn debug(self: BrushModel) void {
         for (self.brushes) |brush| {
-            for (self.planes[brush.first_plane..][0..brush.planes_count], 0..) |plane, i| {
-                var color: [4]f32 = if (i == 0)
-                    .{ 1.0, 0.3, 0.3, 1.0 }
-                else
-                    .{ 1.0, 0.0, 0.0, 1.0 };
-                std.debug.assert(@fabs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
-                do.arrow(
-                    .world,
-                    plane.origin,
-                    plane.vec.xyz(),
-                    color,
-                );
-            }
+            brush.debug(self);
         }
     }
 };

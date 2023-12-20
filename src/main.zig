@@ -300,6 +300,9 @@ pub fn main() !void {
 
     // c.glEnable(c.GL_CULL_FACE);
 
+    var trace_origin = linalg.Vec3.zero();
+    var trace_direction = linalg.Vec3.zero();
+
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
         var delta: f32 = @floatCast(time - previous_time);
@@ -359,6 +362,42 @@ pub fn main() !void {
             break :map {};
         }
 
+        var show_ray = true;
+        if (app.actions[@intFromEnum(ActionId.attack1)] > 0.5) {
+            trace_origin = matrix_camera.multiplyVector(linalg.Vec4.new(0.0, 0.0, 0.0, 1.0)).xyz();
+            trace_direction = matrix_camera.multiplyVector(linalg.Vec4.new(1.0, 0.0, 0.0, 0.0)).xyz().mulScalar(20.0);
+            show_ray = false;
+        }
+
+        if (app.actions[@intFromEnum(ActionId.attack2)] > 0.5) {
+            trace_direction.data[0] = 0.0;
+            trace_direction.data[1] = 0.0;
+        }
+
+        if (map_bmodel.traceBox(trace_origin, trace_direction, linalg.Vec3.broadcast(0.5))) |impact| {
+            if (show_ray)
+                do.arrow(.world, trace_origin, trace_direction.mulScalar(impact.time), .{ 0.0, 0.5, 1.0, 1.0 });
+            do.arrow(
+                .world,
+                trace_origin.add(trace_direction.mulScalar(impact.time)),
+                impact.plane.vec.xyz(),
+                .{ 0.0, 1.0, 0.0, 1.0 },
+            );
+
+            do.arrow(
+                .world,
+                impact.plane.origin,
+                impact.plane.vec.xyz(),
+                .{ 1.0, 1.0, 0.0, 1.0 },
+            );
+
+            impact.brush.debug(map_bmodel);
+        } else {
+            if (show_ray) {
+                do.arrow(.world, trace_origin, trace_direction, .{ 0.0, 0.5, 1.0, 1.0 });
+            }
+        }
+
         // do.addObject(.{
         //     .space = .world,
         //     .model = &map,
@@ -397,7 +436,7 @@ pub fn main() !void {
             model.draw();
         }
 
-        map_bmodel.debug();
+        // map_bmodel.debug();
 
         do.projectionview_matrices = .{
             matrix_projectionview,
