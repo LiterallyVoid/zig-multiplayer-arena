@@ -38,6 +38,7 @@ pub const Event = union(enum) {
     },
 };
 
+/// THIS IS LEGACY CODE NEVER USE IT AGAIN
 pub const Flycam = struct {
     origin: linalg.Vec3 = linalg.Vec3.new(0.0, 0.0, 5.0),
     velocity: linalg.Vec3 = linalg.Vec3.zero(),
@@ -140,22 +141,157 @@ pub const EventTranslator = struct {
     }
 };
 
+pub const Walkcam = struct {
+    origin: linalg.Vec3 = linalg.Vec3.new(0.0, 0.0, 25.0),
+    velocity: linalg.Vec3 = linalg.Vec3.zero(),
+    angle: [2]f32 = .{ 0.0, 0.0 },
+
+    map_bmodel: *collision.BrushModel,
+
+    actions: [6]f32 = .{0.0} ** 6,
+    fast: bool = false,
+    slow: bool = false,
+
+    pub fn update(self: *Walkcam, delta: f32) void {
+        self.velocity.data[2] -= 30.0 * delta;
+        if (self.actions[4] > 0.5 and self.velocity.data[2] < 0.1) {
+            self.velocity.data[2] = 10.0;
+        }
+
+        var speed: f32 = 10.0;
+
+        if (self.fast) {
+            speed *= 10.0;
+        }
+
+        if (self.slow) {
+            speed /= 3.0;
+        }
+
+        var move_2d = linalg.Vec2.new(
+            self.actions[2] - self.actions[3],
+            self.actions[0] - self.actions[1],
+        );
+
+        move_2d = move_2d.rotate(self.angle[0]);
+        const move = move_2d.swizzle(linalg.Vec3, "xy0");
+
+        const accel = 120.0;
+        const decel = 60.0;
+
+        const velocity_2d = self.velocity.swizzle(linalg.Vec3, "xy0");
+        blk: {
+            const current_speed = velocity_2d.length();
+            if (current_speed == 0.0) break :blk {};
+
+            self.velocity = self.velocity.sub(velocity_2d.mulScalar(@min(current_speed, decel * delta) / current_speed));
+        }
+
+        if (move.length() > 0.0) {
+            const dir = move.normalized();
+            const current_speed = self.velocity.dot(dir);
+            const target_speed = @min(move.length(), 1.0) * speed;
+
+            if (current_speed < target_speed) {
+                self.velocity = self.velocity.add(dir.mulScalar(@min(target_speed - current_speed, accel * delta)));
+            }
+        }
+
+        var remainder: f32 = 1.0;
+
+        std.log.info("****STEP", .{});
+        for (0..4) |_| {
+            var step = self.velocity.mulScalar(delta * remainder);
+            if (self.map_bmodel.traceBox(self.origin, step, linalg.Vec3.broadcast(0.5))) |impact| {
+                if (impact.time > 0.0) {
+                    self.origin = self.origin.add(step.mulScalar(impact.time));
+
+                    remainder *= 1.0 - impact.time;
+                }
+
+                const normal = impact.plane.vec.xyz();
+
+                self.velocity = self.velocity.sub(normal.mulScalar(self.velocity.dot(normal) * 1.0));
+
+                impact.brush.debug(self.map_bmodel.*);
+
+                do.arrow(
+                    .world,
+                    self.origin.sub(impact.plane.vec.xyz().mulScalar(0.5)),
+                    impact.plane.vec.xyz().mulScalar(0.2),
+                    .{ 1.0, 0.0, 1.0, 1.0 },
+                );
+            } else {
+                self.origin = self.origin.add(step);
+                break;
+            }
+        }
+    }
+
+    pub fn calculateBasis(self: *const Walkcam) linalg.Mat3 {
+        return linalg.Mat3.rotation(linalg.Vec3.new(0.0, 1.0, 0.0), self.angle[1])
+            .multiply(linalg.Mat3.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), self.angle[0]));
+    }
+
+    pub fn cameraMatrix(self: *const Walkcam) linalg.Mat4 {
+        return linalg.Mat4.translationVec(self.origin)
+            .multiply(self.calculateBasis().toMat4());
+    }
+
+    pub fn handleEvent(self: *Walkcam, event: Event) bool {
+        switch (event) {
+            .mouse_motion => |mouse_motion| {
+                self.angle[0] += mouse_motion.relative[0] * 0.003;
+                self.angle[1] += mouse_motion.relative[1] * 0.003;
+
+                self.angle[0] = @rem(self.angle[0], std.math.tau);
+                self.angle[1] = std.math.clamp(self.angle[1], -std.math.pi * 0.5, std.math.pi * 0.5);
+
+                return true;
+            },
+
+            .action => |action| {
+                switch (action.id) {
+                    .forward => self.actions[0] = action.value,
+                    .back => self.actions[1] = action.value,
+                    .left => self.actions[2] = action.value,
+                    .right => self.actions[3] = action.value,
+                    .jump => self.actions[4] = action.value,
+                    .crouch => self.actions[5] = action.value,
+
+                    .fly_fast => self.fast = action.pressed,
+                    .fly_slow => self.slow = action.pressed,
+
+                    else => return false,
+                }
+
+                return true;
+            },
+        }
+
+        return false;
+    }
+};
+
 pub const App = struct {
     allocator: std.mem.Allocator,
 
     event_translator: EventTranslator = .{},
-    flycam: Flycam = .{},
+    cam: Walkcam,
 
     actions: [ActionId.max_enum]f32 = .{0.0} ** ActionId.max_enum,
 
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
+
+            // ugly hack: this will be set later
+            .cam = undefined,
         };
     }
 
     pub fn update(self: *App, delta: f32) void {
-        self.flycam.update(delta);
+        self.cam.update(delta);
     }
 
     pub fn handleEvent(self: *App, event: Event) bool {
@@ -166,7 +302,7 @@ pub const App = struct {
 
             else => {},
         }
-        if (self.flycam.handleEvent(event)) return true;
+        if (self.cam.handleEvent(event)) return true;
 
         return false;
     }
@@ -298,6 +434,10 @@ pub fn main() !void {
     do.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
     defer do.resources.shader_flat.deinit();
 
+    app.cam = Walkcam{
+        .map_bmodel = &map_bmodel,
+    };
+
     // c.glEnable(c.GL_CULL_FACE);
 
     var trace_origin = linalg.Vec3.zero();
@@ -346,7 +486,7 @@ pub fn main() !void {
         });
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(linalg.Mat4.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), std.math.pi * 0.5));
 
-        const matrix_camera = app.flycam.cameraMatrix();
+        const matrix_camera = app.cam.cameraMatrix();
 
         matrix_projectionview = matrix_projectionview.multiply(matrix_camera.inverse());
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(matrix_camera.inverse());
@@ -374,27 +514,29 @@ pub fn main() !void {
             trace_direction.data[1] = 0.0;
         }
 
-        if (map_bmodel.traceBox(trace_origin, trace_direction, linalg.Vec3.broadcast(0.5))) |impact| {
-            if (show_ray)
-                do.arrow(.world, trace_origin, trace_direction.mulScalar(impact.time), .{ 0.0, 0.5, 1.0, 1.0 });
-            do.arrow(
-                .world,
-                trace_origin.add(trace_direction.mulScalar(impact.time)),
-                impact.plane.vec.xyz(),
-                .{ 0.0, 1.0, 0.0, 1.0 },
-            );
+        if (false) {
+            if (map_bmodel.traceBox(trace_origin, trace_direction, linalg.Vec3.broadcast(0.5))) |impact| {
+                if (show_ray)
+                    do.arrow(.world, trace_origin, trace_direction.mulScalar(impact.time), .{ 0.0, 0.5, 1.0, 1.0 });
+                do.arrow(
+                    .world,
+                    trace_origin.add(trace_direction.mulScalar(impact.time)),
+                    impact.plane.vec.xyz(),
+                    .{ 0.0, 1.0, 0.0, 1.0 },
+                );
 
-            do.arrow(
-                .world,
-                impact.plane.origin,
-                impact.plane.vec.xyz(),
-                .{ 1.0, 1.0, 0.0, 1.0 },
-            );
+                do.arrow(
+                    .world,
+                    impact.plane.origin,
+                    impact.plane.vec.xyz(),
+                    .{ 1.0, 1.0, 0.0, 1.0 },
+                );
 
-            impact.brush.debug(map_bmodel);
-        } else {
-            if (show_ray) {
-                do.arrow(.world, trace_origin, trace_direction, .{ 0.0, 0.5, 1.0, 1.0 });
+                impact.brush.debug(map_bmodel);
+            } else {
+                if (show_ray) {
+                    do.arrow(.world, trace_origin, trace_direction, .{ 0.0, 0.5, 1.0, 1.0 });
+                }
             }
         }
 

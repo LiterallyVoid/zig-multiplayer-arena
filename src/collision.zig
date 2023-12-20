@@ -119,6 +119,8 @@ pub const BrushModel = struct {
 
         const planes_slice = try planes.toOwnedSlice();
 
+        std.log.info("{any}", .{planes_slice});
+
         return .{
             .planes = planes_slice,
             .brushes = brushes,
@@ -164,7 +166,12 @@ pub const BrushModel = struct {
 
             const edge = vertex_2.sub(vertex_1);
 
-            const bevel_plane = direction.cross(edge).normalized();
+            var bevel_plane = direction.cross(edge);
+            if (bevel_plane.lengthSquared() < 1e-12) {
+                continue;
+            }
+
+            bevel_plane = bevel_plane.normalized();
 
             for (planes.items[first_plane..]) |existing_plane|
                 if (existing_plane.vec.xyz().dot(bevel_plane) > 1.0 - DUPE_PLANE_EPSILON) continue :edges;
@@ -189,35 +196,45 @@ pub const BrushModel = struct {
         const origin4 = origin.xyzw(1.0);
         const distance4 = direction.xyzw(0.0);
 
+        const direction4 = distance4.normalized();
+
         var nearest_impact: ?Impact = null;
+
+        std.log.info("** TRACE", .{});
 
         brushes: for (self.brushes) |brush| {
             var entrance: f32 = -1.0;
+            var entrance_distance: f32 = 0.0;
+            var entrance_bad = true;
             var entrance_plane: Plane = undefined;
 
-            var exit: f32 = 2.0;
+            var exit: f32 = 1.0;
 
             const planes_count = if (bevel_planes) brush.planes_count else brush.planes_count_no_bevels;
 
             for (self.planes[brush.first_plane..][0..planes_count]) |plane| {
                 const distance = plane.vec.dot(origin4) - plane.vec.xyz().abs().dot(half_extents);
-                const slope = plane.vec.dot(distance4);
+                const slope = plane.vec.dot(direction4);
+                const slope_per_length = plane.vec.dot(distance4);
 
-                const time = distance / -slope;
+                const time = distance / -slope_per_length;
 
-                if (slope < 0.0) {
+                if (slope_per_length < 0.0) {
                     if (time > entrance) {
-                        entrance = time;
+                        entrance = time - (0.0001 / -slope_per_length);
+                        entrance_distance = distance;
+                        entrance_bad = distance < -1e-6 * (-slope * 0.5 + 0.5);
                         entrance_plane = plane;
                     }
-                } else if (slope > 0.0) {
+                } else if (slope_per_length > 0.0) {
                     exit = @min(exit, time);
                 } else {
-                    if (distance > 0.0) continue :brushes;
+                    if (distance > -1e-6) continue :brushes;
                 }
             }
 
-            if (entrance < exit + 1e-6 and entrance > -1e-6) {
+            if (entrance < exit + 1e-6 and !entrance_bad) {
+                std.log.info("{d}", .{entrance_distance});
                 if (nearest_impact) |last_impact| {
                     if (last_impact.time < entrance) continue :brushes;
                 }

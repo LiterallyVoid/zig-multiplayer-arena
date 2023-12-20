@@ -43,6 +43,15 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
                 pub fn new(x: Element, y: Element) Self {
                     return Self{ .data = [_]Element{ x, y } };
                 }
+
+                pub fn rotate(self: Self, angle: Element) Self {
+                    const s = @sin(angle);
+                    const c = @cos(angle);
+
+                    return Self{
+                        .data = .{ self.data[0] * s + self.data[1] * c, self.data[0] * c - self.data[1] * s },
+                    };
+                }
             }
         else
             struct {};
@@ -329,6 +338,7 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
                     else => unreachable,
                 };
             }
+            return other;
         }
 
         /// Project `self` onto the plane facing `plane`.
