@@ -214,7 +214,9 @@ pub const Walkcam = struct {
         if (self.fly) {
             flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
         } else {
-            walkMove(self.map_bmodel, &self.origin, &self.velocity, delta);
+            if (!walkMove(self.map_bmodel, &self.origin, &self.velocity, delta)) {
+                flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
+            }
         }
     }
 
@@ -264,8 +266,7 @@ pub const Walkcam = struct {
         }
     }
 
-    pub fn walkMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) void {
-        velocity.data[2] = 0.0;
+    pub fn walkMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) bool {
         const half_extents = linalg.Vec3.broadcast(1.0);
 
         const step_height = 0.23;
@@ -275,22 +276,23 @@ pub const Walkcam = struct {
         const half_extents_minus_step = half_extents.sub(linalg.Vec3.new(0.0, 0.0, step_height * 0.5));
 
         var attempt_position = position.*;
+        var attempt_velocity = velocity.*;
+        attempt_velocity.data[2] = 0.0;
 
         // Horizontal collisions.
         var remainder = delta;
         for (0..4) |_| {
-            const forwards_target = velocity.mulScalar(remainder);
+            const forwards_target = attempt_velocity.mulScalar(remainder);
             if (map.traceBox(
                 attempt_position.add(step_position_offset),
                 forwards_target,
                 half_extents_minus_step,
             )) |impact| {
                 attempt_position = attempt_position.add(forwards_target.mulScalar(impact.time));
+                remainder *= (1.0 - impact.time);
 
                 const normal = impact.plane.vec.xyz();
-                velocity.* = velocity.*.sub(normal.mulScalar(velocity.*.dot(normal) * 1.005));
-
-                remainder *= (1.0 - impact.time);
+                attempt_velocity = attempt_velocity.sub(normal.mulScalar(attempt_velocity.dot(normal) * 1.005));
             } else {
                 attempt_position = attempt_position.add(forwards_target);
                 remainder = 0.0;
@@ -304,13 +306,22 @@ pub const Walkcam = struct {
             linalg.Vec3.new(0.0, 0.0, step_down_target),
             half_extents_minus_step,
         )) |step_down_impact| {
-            // The `+ step_height` is because this trace ignored the bottom `step_height` units of the hitbox; I have to add it back here.
-            attempt_position.data[2] += step_down_target * step_down_impact.time + step_height;
+            attempt_position.data[2] += step_down_target * step_down_impact.time;
         } else {
-            // We didn't hit the ground. Do nothing, because we're at the right height already.
+            // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I DIDN'T WANT, GEOFF!
+            return false;
+        }
+
+        if (map.traceBox(attempt_position.add(step_position_offset), linalg.Vec3.new(0, 0, step_height), half_extents_minus_step)) |_| {
+            return false;
+        } else {
+            attempt_position.data[2] += step_height;
         }
 
         position.* = attempt_position;
+        velocity.* = attempt_velocity;
+
+        return true;
     }
 
     pub fn calculateBasis(self: *const Walkcam) linalg.Mat3 {
