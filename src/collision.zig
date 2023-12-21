@@ -30,8 +30,9 @@ pub const Brush = struct {
     /// For debugging.
     origin: linalg.Vec3,
 
-    pub fn debug(self: Brush, bmodel: BrushModel) void {
-        for (bmodel.planes[self.first_plane..][0..self.planes_count]) |plane| {
+    pub fn debug(self: Brush, bmodel: BrushModel, bevels: bool) void {
+        const planes_count = if (bevels) self.planes_count else self.planes_count_no_bevels;
+        for (bmodel.planes[self.first_plane..][0..planes_count]) |plane| {
             var color: [4]f32 = .{ 1.0, 0.3, 0.2, 1.0 };
             std.debug.assert(@fabs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
             do.arrow(
@@ -119,8 +120,6 @@ pub const BrushModel = struct {
 
         const planes_slice = try planes.toOwnedSlice();
 
-        std.log.info("{any}", .{planes_slice});
-
         return .{
             .planes = planes_slice,
             .brushes = brushes,
@@ -200,8 +199,6 @@ pub const BrushModel = struct {
 
         var nearest_impact: ?Impact = null;
 
-        std.log.info("** TRACE", .{});
-
         brushes: for (self.brushes) |brush| {
             var entrance: f32 = -1.0;
             var entrance_distance: f32 = 0.0;
@@ -234,7 +231,6 @@ pub const BrushModel = struct {
             }
 
             if (entrance < exit + 1e-6 and !entrance_bad) {
-                std.log.info("{d}", .{entrance_distance});
                 if (nearest_impact) |last_impact| {
                     if (last_impact.time < entrance) continue :brushes;
                 }

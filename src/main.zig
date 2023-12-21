@@ -22,6 +22,11 @@ pub const ActionId = enum {
     fly_fast,
     fly_slow,
 
+    debug1,
+    debug2,
+    debug3,
+    debug4,
+
     pub const max_enum = std.meta.fields(ActionId).len;
 };
 
@@ -47,6 +52,7 @@ pub const Flycam = struct {
     actions: [6]f32 = .{0.0} ** 6,
     fast: bool = false,
     slow: bool = false,
+    fly: bool = false,
 
     pub fn update(self: *Flycam, delta: f32) void {
         const basis = self.calculateBasis();
@@ -57,7 +63,7 @@ pub const Flycam = struct {
 
         self.velocity = self.velocity.mulScalar(std.math.exp(-delta * 20.0));
 
-        var speed: f32 = 250.0;
+        var speed: f32 = 150.0;
 
         if (self.fast) {
             speed *= 10.0;
@@ -151,21 +157,17 @@ pub const Walkcam = struct {
     actions: [6]f32 = .{0.0} ** 6,
     fast: bool = false,
     slow: bool = false,
+    fly: bool = false,
 
     pub fn update(self: *Walkcam, delta: f32) void {
-        self.velocity.data[2] -= 30.0 * delta;
-        if (self.actions[4] > 0.5 and self.velocity.data[2] < 0.1) {
-            self.velocity.data[2] = 10.0;
-        }
-
         var speed: f32 = 10.0;
 
         if (self.fast) {
-            speed *= 10.0;
+            speed *= 5.0;
         }
 
         if (self.slow) {
-            speed /= 3.0;
+            speed /= 2.0;
         }
 
         var move_2d = linalg.Vec2.new(
@@ -176,33 +178,46 @@ pub const Walkcam = struct {
         move_2d = move_2d.rotate(self.angle[0]);
         const move = move_2d.swizzle(linalg.Vec3, "xy0");
 
-        const accel = 120.0;
-        const decel = 60.0;
+        if (self.fly) {
+            speed *= 10.0;
+            self.velocity = self.velocity.mulScalar(std.math.exp(-delta * 5.0));
+            self.velocity = self.velocity.add(move.mulScalar(delta * speed));
+            self.velocity.data[2] += (self.actions[4] - self.actions[5]) * delta * speed;
+        } else {
+            self.velocity.data[2] -= 20.0 * delta;
+            if (self.actions[4] > 0.5 and self.velocity.data[2] < 0.1) {
+                self.velocity.data[2] = 8.0;
+            }
 
-        const velocity_2d = self.velocity.swizzle(linalg.Vec3, "xy0");
-        blk: {
-            const current_speed = velocity_2d.length();
-            if (current_speed == 0.0) break :blk {};
+            const accel = 300.0;
+            const decel = 60.0;
 
-            self.velocity = self.velocity.sub(velocity_2d.mulScalar(@min(current_speed, decel * delta) / current_speed));
-        }
+            const velocity_2d = self.velocity.swizzle(linalg.Vec3, "xy0");
+            blk: {
+                const current_speed = velocity_2d.length();
+                if (current_speed == 0.0) break :blk {};
 
-        if (move.length() > 0.0) {
-            const dir = move.normalized();
-            const current_speed = self.velocity.dot(dir);
-            const target_speed = @min(move.length(), 1.0) * speed;
+                self.velocity = self.velocity.sub(velocity_2d.mulScalar(@min(current_speed, decel * delta) / current_speed));
+            }
 
-            if (current_speed < target_speed) {
-                self.velocity = self.velocity.add(dir.mulScalar(@min(target_speed - current_speed, accel * delta)));
+            if (move.length() > 0.0) {
+                const dir = move.normalized();
+                const current_speed = self.velocity.dot(dir);
+                const target_speed = @min(move.length(), 1.0) * speed;
+
+                if (current_speed < target_speed) {
+                    self.velocity = self.velocity.add(dir.mulScalar(@min(target_speed - current_speed, accel * delta)));
+                }
             }
         }
 
         var remainder: f32 = 1.0;
 
-        std.log.info("****STEP", .{});
-        for (0..4) |_| {
+        var normals: [4]linalg.Vec3 = undefined;
+
+        for (0..4) |i| {
             var step = self.velocity.mulScalar(delta * remainder);
-            if (self.map_bmodel.traceBox(self.origin, step, linalg.Vec3.broadcast(0.5))) |impact| {
+            if (self.map_bmodel.traceBox(self.origin, step, linalg.Vec3.broadcast(1.0))) |impact| {
                 if (impact.time > 0.0) {
                     self.origin = self.origin.add(step.mulScalar(impact.time));
 
@@ -211,9 +226,14 @@ pub const Walkcam = struct {
 
                 const normal = impact.plane.vec.xyz();
 
+                for (normals[0..i]) |previous_normal| {
+                    if (previous_normal.dot(self.velocity) > 0.0) continue;
+                    const edge = previous_normal.cross(normal).normalized();
+                    self.velocity = edge.mulScalar(edge.dot(self.velocity));
+                }
                 self.velocity = self.velocity.sub(normal.mulScalar(self.velocity.dot(normal) * 1.0));
 
-                impact.brush.debug(self.map_bmodel.*);
+                impact.brush.debug(self.map_bmodel.*, true);
 
                 do.arrow(
                     .world,
@@ -221,11 +241,16 @@ pub const Walkcam = struct {
                     impact.plane.vec.xyz().mulScalar(0.2),
                     .{ 1.0, 0.0, 1.0, 1.0 },
                 );
+
+                normals[i] = normal;
             } else {
                 self.origin = self.origin.add(step);
+                remainder = 0;
                 break;
             }
         }
+
+        std.log.info("remainder {d}", .{remainder});
     }
 
     pub fn calculateBasis(self: *const Walkcam) linalg.Mat3 {
@@ -234,7 +259,7 @@ pub const Walkcam = struct {
     }
 
     pub fn cameraMatrix(self: *const Walkcam) linalg.Mat4 {
-        return linalg.Mat4.translationVec(self.origin)
+        return linalg.Mat4.translationVec(self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5)))
             .multiply(self.calculateBasis().toMat4());
     }
 
@@ -261,6 +286,12 @@ pub const Walkcam = struct {
 
                     .fly_fast => self.fast = action.pressed,
                     .fly_slow => self.slow = action.pressed,
+
+                    .debug1 => if (action.pressed) {
+                        self.fly = !self.fly;
+                        const msg = if (self.fly) "enabled" else "disabled";
+                        std.debug.print("fly mode {s}\n", .{msg});
+                    },
 
                     else => return false,
                 }
@@ -358,6 +389,12 @@ pub const App = struct {
             => .fly_fast,
 
             c.GLFW_KEY_LEFT_ALT => .fly_slow,
+
+            c.GLFW_KEY_F1 => .debug1,
+            c.GLFW_KEY_F2 => .debug2,
+            c.GLFW_KEY_F3 => .debug3,
+            c.GLFW_KEY_F4 => .debug4,
+
             else => return,
         };
 
@@ -455,7 +492,7 @@ pub fn main() !void {
 
         c.glViewport(0, 0, width, height);
 
-        c.glClearColor(0.2, 0.2, 0.2, 1.0);
+        c.glClearColor(0.5, 0.7, 1.0, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
         c.glEnable(c.GL_DEPTH_TEST);
@@ -514,10 +551,10 @@ pub fn main() !void {
             trace_direction.data[1] = 0.0;
         }
 
-        if (false) {
-            if (map_bmodel.traceBox(trace_origin, trace_direction, linalg.Vec3.broadcast(0.5))) |impact| {
+        if (true) {
+            if (map_bmodel.traceRay(trace_origin, trace_direction)) |impact| {
                 if (show_ray)
-                    do.arrow(.world, trace_origin, trace_direction.mulScalar(impact.time), .{ 0.0, 0.5, 1.0, 1.0 });
+                    do.arrow(.world, trace_origin.add(trace_direction.mulScalar(impact.time * 0.5)), trace_direction.mulScalar(impact.time), .{ 0.0, 0.5, 1.0, 1.0 });
                 do.arrow(
                     .world,
                     trace_origin.add(trace_direction.mulScalar(impact.time)),
@@ -532,7 +569,7 @@ pub fn main() !void {
                     .{ 1.0, 1.0, 0.0, 1.0 },
                 );
 
-                impact.brush.debug(map_bmodel);
+                impact.brush.debug(map_bmodel, false);
             } else {
                 if (show_ray) {
                     do.arrow(.world, trace_origin, trace_direction, .{ 0.0, 0.5, 1.0, 1.0 });

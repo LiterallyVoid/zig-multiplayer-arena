@@ -47,7 +47,7 @@ float triplanarAxisShare(float axis) {
 }
 
 void main() {
-    f_main = vec4(1.0, 0.5, 0.2, 1.0);
+    f_main = vec4(0.9, 0.9, 0.9, 1.0);
 
     vec3 grid_axes = gridPlanes(v_position_bind);
     vec4 grid_axes_with_w = vec4(grid_axes, 1.0);
