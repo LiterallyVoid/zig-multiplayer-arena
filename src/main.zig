@@ -221,7 +221,7 @@ pub const Walkcam = struct {
         var normals: [4]linalg.Vec3 = undefined;
 
         for (0..4) |i| {
-            var step = velocity.*.mulScalar(delta * remainder);
+            var step = velocity.*.mulScalar(remainder);
             if (map.traceBox(position.*, step, half_extents)) |impact| {
                 if (impact.time > 0.0) {
                     position.* = position.*.add(step.mulScalar(impact.time));
