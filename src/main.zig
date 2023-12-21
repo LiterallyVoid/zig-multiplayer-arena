@@ -226,12 +226,14 @@ pub const Walkcam = struct {
 
                 const normal = impact.plane.vec.xyz();
 
+                self.velocity = self.velocity.sub(normal.mulScalar(self.velocity.dot(normal) * 1.0));
+
                 for (normals[0..i]) |previous_normal| {
-                    if (previous_normal.dot(self.velocity) > 0.0) continue;
+                    if (previous_normal.dot(self.velocity) > 1e-6) continue;
+                    if (previous_normal.dot(normal) > 1 - 1e-6) continue;
                     const edge = previous_normal.cross(normal).normalized();
                     self.velocity = edge.mulScalar(edge.dot(self.velocity));
                 }
-                self.velocity = self.velocity.sub(normal.mulScalar(self.velocity.dot(normal) * 1.0));
 
                 impact.brush.debug(self.map_bmodel.*, true);
 
