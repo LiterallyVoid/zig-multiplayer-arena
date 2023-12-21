@@ -148,6 +148,12 @@ pub const EventTranslator = struct {
 };
 
 pub const Walkcam = struct {
+    pub const State = enum {
+        walk,
+        fall,
+
+        fly,
+    };
     origin: linalg.Vec3 = linalg.Vec3.new(0.0, 0.0, 25.0),
     velocity: linalg.Vec3 = linalg.Vec3.zero(),
     angle: [2]f32 = .{ 0.0, 0.0 },
@@ -157,7 +163,8 @@ pub const Walkcam = struct {
     actions: [6]f32 = .{0.0} ** 6,
     fast: bool = false,
     slow: bool = false,
-    fly: bool = false,
+
+    state: State = .fall,
 
     pub fn update(self: *Walkcam, delta: f32) void {
         var speed: f32 = 10.0;
@@ -176,51 +183,36 @@ pub const Walkcam = struct {
         );
 
         move_2d = move_2d.rotate(self.angle[0]);
-        const move = move_2d.swizzle(linalg.Vec3, "xy0");
+        var move = move_2d.swizzle(linalg.Vec3, "xy0");
+        move.data[2] = self.actions[4] - self.actions[5];
 
-        if (self.fly) {
-            speed *= 10.0;
-            self.velocity = self.velocity.mulScalar(std.math.exp(-delta * 5.0));
-            self.velocity = self.velocity.add(move.mulScalar(delta * speed));
-            self.velocity.data[2] += (self.actions[4] - self.actions[5]) * delta * speed;
-        } else {
-            self.velocity.data[2] -= 20.0 * delta;
-            if (self.actions[4] > 0.5 and self.velocity.data[2] < 0.1) {
-                self.velocity.data[2] = 8.0;
-            }
-
-            const accel = 200.0;
-            const decel = 100.0;
-
-            const velocity_2d = self.velocity.swizzle(linalg.Vec3, "xy0");
-            blk: {
-                const current_speed = velocity_2d.length();
-                if (current_speed == 0.0) break :blk {};
-
-                self.velocity = self.velocity.sub(velocity_2d.mulScalar(@min(current_speed, decel * delta) / current_speed));
-            }
-
-            if (move.length() > 0.0) {
-                const dir = move.normalized();
-                const current_speed = self.velocity.dot(dir);
-                const target_speed = @min(move.length(), 1.0) * speed;
-
-                if (current_speed < target_speed) {
-                    self.velocity = self.velocity.add(dir.mulScalar(@min(target_speed - current_speed, accel * delta)));
-                }
-            }
-        }
-
-        if (self.fly) {
-            flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
-        } else {
+        if (self.state == .fly) {
+            self.flyForces(delta, move, speed * 10.0);
+            _ = flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
+        } else if (self.state == .walk) {
+            self.walkForces(delta, move, speed, 200.0, 100.0);
             if (!walkMove(self.map_bmodel, &self.origin, &self.velocity, delta)) {
-                flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
+                self.state = .fall;
+                _ = flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
+            }
+
+            if (self.actions[4] > 0.5) {
+                self.velocity.data[2] = 8.0;
+                self.state = .fall;
+            }
+        } else if (self.state == .fall) {
+            self.walkForces(delta, move, speed * 0.2, 30.0, 0.0);
+
+            if (flyMove(self.map_bmodel, &self.origin, &self.velocity, delta).on_ground) {
+                self.state = .walk;
             }
         }
     }
 
-    pub fn flyMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) void {
+    pub fn flyMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
+        const ground_threshold: f32 = 0.9;
+
+        var on_ground = false;
         const half_extents = linalg.Vec3.broadcast(1.0);
         var remainder: f32 = delta;
 
@@ -236,6 +228,9 @@ pub const Walkcam = struct {
                 }
 
                 const normal = impact.plane.vec.xyz();
+                if (normal.data[2] > ground_threshold) {
+                    on_ground = true;
+                }
 
                 velocity.* = velocity.*.sub(normal.mulScalar(velocity.*.dot(normal) * 1.005));
 
@@ -264,9 +259,15 @@ pub const Walkcam = struct {
         if (remainder > 1e-6) {
             std.log.warn("{d}% of movement left after tick", .{remainder / delta * 100});
         }
+
+        return .{
+            .on_ground = on_ground,
+        };
     }
 
     pub fn walkMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) bool {
+        const ground_threshold: f32 = 0.9;
+
         const half_extents = linalg.Vec3.broadcast(1.0);
 
         const step_height = 0.23;
@@ -306,6 +307,8 @@ pub const Walkcam = struct {
             linalg.Vec3.new(0.0, 0.0, step_down_target),
             half_extents_minus_step,
         )) |step_down_impact| {
+            // We hit something, but it WASN'T GROUND!
+            if (step_down_impact.plane.vec.data[2] <= ground_threshold) return false;
             attempt_position.data[2] += step_down_target * step_down_impact.time;
         } else {
             // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I WAS AFRAID OF, GEOFF!
@@ -322,6 +325,35 @@ pub const Walkcam = struct {
         velocity.* = attempt_velocity;
 
         return true;
+    }
+
+    pub fn walkForces(self: *Walkcam, delta: f32, move: linalg.Vec3, speed: f32, accel: f32, decel: f32) void {
+        self.velocity.data[2] -= 20.0 * delta;
+
+        const velocity_2d = self.velocity.swizzle(linalg.Vec3, "xy0");
+        blk: {
+            const current_speed = velocity_2d.length();
+            if (current_speed == 0.0) break :blk {};
+
+            self.velocity = self.velocity.sub(velocity_2d.mulScalar(@min(current_speed, decel * delta) / current_speed));
+        }
+
+        const move_horizontal = move.mul(linalg.Vec3.new(1.0, 1.0, 0.0));
+
+        if (move_horizontal.length() > 0.0) {
+            const dir = move_horizontal.normalized();
+            const current_speed = self.velocity.dot(dir);
+            const target_speed = @min(move.length(), 1.0) * speed;
+
+            if (current_speed < target_speed) {
+                self.velocity = self.velocity.add(dir.mulScalar(@min(target_speed - current_speed, accel * delta)));
+            }
+        }
+    }
+
+    pub fn flyForces(self: *Walkcam, delta: f32, move: linalg.Vec3, speed: f32) void {
+        self.velocity = self.velocity.mulScalar(std.math.exp(-delta * 5.0));
+        self.velocity = self.velocity.add(move.mulScalar(delta * speed));
     }
 
     pub fn calculateBasis(self: *const Walkcam) linalg.Mat3 {
@@ -359,9 +391,13 @@ pub const Walkcam = struct {
                     .fly_slow => self.slow = action.pressed,
 
                     .debug1 => if (action.pressed) {
-                        self.fly = !self.fly;
-                        const msg = if (self.fly) "enabled" else "disabled";
-                        std.debug.print("fly mode {s}\n", .{msg});
+                        if (self.state == .fly) {
+                            self.state = .fall;
+                            std.debug.print("fly mode disabled\n", .{});
+                        } else {
+                            self.state = .fly;
+                            std.debug.print("fly mode enabled\n", .{});
+                        }
                     },
 
                     else => return false,
