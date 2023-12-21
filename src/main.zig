@@ -231,7 +231,7 @@ pub const Walkcam = struct {
 
                 const normal = impact.plane.vec.xyz();
 
-                velocity.* = velocity.*.sub(normal.mulScalar(velocity.*.dot(normal) * 1.0));
+                velocity.* = velocity.*.sub(normal.mulScalar(velocity.*.dot(normal) * 1.005));
 
                 for (normals[0..i]) |previous_normal| {
                     if (previous_normal.dot(velocity.*) > 1e-6) continue;
