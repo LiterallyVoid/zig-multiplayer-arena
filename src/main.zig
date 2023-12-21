@@ -443,6 +443,8 @@ pub const App = struct {
 
     actions: [ActionId.max_enum]f32 = .{0.0} ** ActionId.max_enum,
 
+    timescale: f32 = 1.0,
+
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
@@ -453,13 +455,24 @@ pub const App = struct {
     }
 
     pub fn update(self: *App, delta: f32) void {
-        self.cam.update(delta);
+        self.cam.update(delta * self.timescale);
     }
 
     pub fn handleEvent(self: *App, event: Event) bool {
         switch (event) {
             .action => |action| {
                 self.actions[@intFromEnum(action.id)] = action.value;
+                if (action.id == .debug2) {
+                    if (action.pressed) {
+                        if (self.timescale > 0.7) {
+                            self.timescale = 0.2;
+                        } else {
+                            self.timescale = 1.0;
+                        }
+                        std.debug.print("timescale = {d}\n", .{self.timescale});
+                    }
+                    return true;
+                }
             },
 
             else => {},
