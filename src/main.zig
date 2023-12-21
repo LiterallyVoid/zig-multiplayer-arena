@@ -211,48 +211,53 @@ pub const Walkcam = struct {
             }
         }
 
-        var remainder: f32 = 1.0;
+        flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
+    }
+
+    pub fn flyMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) void {
+        const half_extents = linalg.Vec3.broadcast(1.0);
+        var remainder: f32 = delta;
 
         var normals: [4]linalg.Vec3 = undefined;
 
         for (0..4) |i| {
-            var step = self.velocity.mulScalar(delta * remainder);
-            if (self.map_bmodel.traceBox(self.origin, step, linalg.Vec3.broadcast(1.0))) |impact| {
+            var step = velocity.*.mulScalar(delta * remainder);
+            if (map.traceBox(position.*, step, half_extents)) |impact| {
                 if (impact.time > 0.0) {
-                    self.origin = self.origin.add(step.mulScalar(impact.time));
+                    position.* = position.*.add(step.mulScalar(impact.time));
 
                     remainder *= 1.0 - impact.time;
                 }
 
                 const normal = impact.plane.vec.xyz();
 
-                self.velocity = self.velocity.sub(normal.mulScalar(self.velocity.dot(normal) * 1.0));
+                velocity.* = velocity.*.sub(normal.mulScalar(velocity.*.dot(normal) * 1.0));
 
                 for (normals[0..i]) |previous_normal| {
-                    if (previous_normal.dot(self.velocity) > 1e-6) continue;
+                    if (previous_normal.dot(velocity.*) > 1e-6) continue;
                     if (previous_normal.dot(normal) > 1 - 1e-6) continue;
                     const edge = previous_normal.cross(normal).normalized();
-                    self.velocity = edge.mulScalar(edge.dot(self.velocity));
+                    velocity.* = edge.mulScalar(edge.dot(velocity.*));
                 }
-
-                impact.brush.debug(self.map_bmodel.*, true);
 
                 do.arrow(
                     .world,
-                    self.origin.sub(impact.plane.vec.xyz().mulScalar(0.5)),
+                    position.*.sub(impact.plane.vec.xyz().mulScalar(0.5)),
                     impact.plane.vec.xyz().mulScalar(0.2),
                     .{ 1.0, 0.0, 1.0, 1.0 },
                 );
 
                 normals[i] = normal;
             } else {
-                self.origin = self.origin.add(step);
+                position.* = position.*.add(step);
                 remainder = 0;
                 break;
             }
         }
 
-        std.log.info("remainder {d}", .{remainder});
+        if (remainder > 1e-6) {
+            std.log.warn("{d}% of movement left after tick", .{remainder / delta * 100});
+        }
     }
 
     pub fn calculateBasis(self: *const Walkcam) linalg.Mat3 {
