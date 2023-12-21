@@ -308,7 +308,7 @@ pub const Walkcam = struct {
         )) |step_down_impact| {
             attempt_position.data[2] += step_down_target * step_down_impact.time;
         } else {
-            // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I DIDN'T WANT, GEOFF!
+            // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I WAS AFRAID OF, GEOFF!
             return false;
         }
 
