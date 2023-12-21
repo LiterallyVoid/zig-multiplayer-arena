@@ -166,6 +166,8 @@ pub const Walkcam = struct {
 
     state: State = .fall,
 
+    step_smooth: f32 = 0.0,
+
     pub fn update(self: *Walkcam, delta: f32) void {
         var speed: f32 = 10.0;
 
@@ -191,7 +193,9 @@ pub const Walkcam = struct {
             _ = flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
         } else if (self.state == .walk) {
             self.walkForces(delta, move, speed, 200.0, 100.0);
-            if (!walkMove(self.map_bmodel, &self.origin, &self.velocity, delta)) {
+            if (walkMove(self.map_bmodel, &self.origin, &self.velocity, delta)) |walk_info| {
+                self.step_smooth += walk_info.step_jump;
+            } else {
                 self.state = .fall;
                 _ = flyMove(self.map_bmodel, &self.origin, &self.velocity, delta);
             }
@@ -201,16 +205,18 @@ pub const Walkcam = struct {
                 self.state = .fall;
             }
         } else if (self.state == .fall) {
-            self.walkForces(delta, move, speed * 0.2, 30.0, 0.0);
+            self.walkForces(delta, move, speed * 0.2, 80.0, 0.0);
 
             if (flyMove(self.map_bmodel, &self.origin, &self.velocity, delta).on_ground) {
                 self.state = .walk;
             }
         }
+
+        self.step_smooth *= std.math.exp(-delta * 18.0);
     }
 
     pub fn flyMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
-        const ground_threshold: f32 = 0.9;
+        const ground_threshold: f32 = 0.7;
 
         var on_ground = false;
         const half_extents = linalg.Vec3.broadcast(1.0);
@@ -265,12 +271,14 @@ pub const Walkcam = struct {
         };
     }
 
-    pub fn walkMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) bool {
-        const ground_threshold: f32 = 0.9;
+    pub fn walkMove(map: *collision.BrushModel, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
+        step_jump: f32,
+    } {
+        const ground_threshold: f32 = 0.7;
 
         const half_extents = linalg.Vec3.broadcast(1.0);
 
-        const step_height = 0.23;
+        const step_height = 0.3614;
 
         // [position + step_position_offset, half_extents_minus_step] describes a bounding box whose bottom face is moved `step_height` units inwards.
         const step_position_offset = linalg.Vec3.new(0.0, 0.0, step_height * 0.5);
@@ -301,6 +309,9 @@ pub const Walkcam = struct {
             }
         }
 
+        var floor_plane: collision.Plane = undefined;
+
+        var step_offset: f32 = 0.0;
         const step_down_target = -step_height * 2.0;
         if (map.traceBox(
             attempt_position.add(step_position_offset),
@@ -308,23 +319,36 @@ pub const Walkcam = struct {
             half_extents_minus_step,
         )) |step_down_impact| {
             // We hit something, but it WASN'T GROUND!
-            if (step_down_impact.plane.vec.data[2] <= ground_threshold) return false;
+            if (step_down_impact.plane.vec.data[2] <= ground_threshold) return null;
             attempt_position.data[2] += step_down_target * step_down_impact.time;
+
+            step_offset += step_down_target * step_down_impact.time;
+
+            floor_plane = step_down_impact.plane;
         } else {
             // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I WAS AFRAID OF, GEOFF!
-            return false;
+            return null;
         }
 
         if (map.traceBox(attempt_position.add(step_position_offset), linalg.Vec3.new(0, 0, step_height), half_extents_minus_step)) |_| {
-            return false;
+            return null;
         } else {
             attempt_position.data[2] += step_height;
+
+            step_offset += step_height;
         }
+
+        const step_jump =
+            floor_plane.heightFromPoint(linalg.Vec3.new(1.0, 1.0, 0.0).mul(attempt_position)) -
+            floor_plane.heightFromPoint(linalg.Vec3.new(1.0, 1.0, 0.0).mul(position.*)) +
+            (attempt_position.data[2] - position.data[2]);
 
         position.* = attempt_position;
         velocity.* = attempt_velocity;
 
-        return true;
+        return .{
+            .step_jump = step_jump,
+        };
     }
 
     pub fn walkForces(self: *Walkcam, delta: f32, move: linalg.Vec3, speed: f32, accel: f32, decel: f32) void {
@@ -362,7 +386,7 @@ pub const Walkcam = struct {
     }
 
     pub fn cameraMatrix(self: *const Walkcam) linalg.Mat4 {
-        return linalg.Mat4.translationVec(self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5)))
+        return linalg.Mat4.translationVec(self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5 - self.step_smooth)))
             .multiply(self.calculateBasis().toMat4());
     }
 

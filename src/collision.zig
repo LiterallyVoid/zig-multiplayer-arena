@@ -18,6 +18,16 @@ pub const Plane = struct {
 
     /// For debugging; this must be a point on this plane.
     origin: linalg.Vec3,
+
+    pub fn heightFromPoint(self: Plane, position: linalg.Vec3) f32 {
+        const distance = self.vec.dot(position.xyzw(1.0));
+        return distance / self.vec.data[2];
+    }
+
+    pub fn heightFromBoxFloor(self: Plane, position: linalg.Vec3, half_extents: linalg.Vec3) f32 {
+        const box_distance = self.vec.xyz().abs().dot(half_extents);
+        return self.heightFromPoint(position) - box_distance / self.vec.data[2];
+    }
 };
 
 pub const Brush = struct {
