@@ -77,7 +77,7 @@ gl_vao: c.GLuint = 0,
 gl_vbo: c.GLuint = 0,
 
 /// Required, because `vertices` may be freed after upload.
-vertices_count: usize = 0,
+vertices_count: u32 = 0,
 
 pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
     allocator.free(self.vertices);
@@ -105,7 +105,7 @@ pub fn upload(self: *Self) void {
         self.vertices.ptr,
         c.GL_STATIC_DRAW,
     );
-    self.vertices_count = self.vertices.len;
+    self.vertices_count = @intCast(self.vertices.len);
 
     c.glEnableVertexAttribArray(0);
     c.glVertexAttribPointer(

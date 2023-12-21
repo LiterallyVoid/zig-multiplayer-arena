@@ -1,6 +1,8 @@
 const std = @import("std");
 const linalg = @import("./linalg.zig");
 
+const c = @import("./c.zig");
+
 const Shader = @import("./Shader.zig");
 const Model = @import("./Model.zig");
 
@@ -16,7 +18,9 @@ pub const DebugOverlay = struct {
     pub const Object = struct {
         space: Space,
 
-        model: *const Model,
+        gl_vao: c.GLuint,
+        vertex_first: u32,
+        vertices_count: u32,
         model_matrix: linalg.Mat4,
 
         shader: *const Shader,
@@ -81,7 +85,9 @@ pub const DebugOverlay = struct {
         self.addObject(.{
             .space = space,
 
-            .model = &self.resources.model_cylinder,
+            .gl_vao = self.resources.model_cylinder.gl_vao,
+            .vertex_first = 0,
+            .vertices_count = self.resources.model_cylinder.vertices_count,
             .model_matrix = matrix,
             .shader = &self.resources.shader_flat,
 
@@ -90,7 +96,9 @@ pub const DebugOverlay = struct {
         self.addObject(.{
             .space = space,
 
-            .model = &self.resources.model_cone,
+            .gl_vao = self.resources.model_cone.gl_vao,
+            .vertex_first = 0,
+            .vertices_count = self.resources.model_cone.vertices_count,
             .model_matrix = tip_matrix,
             .shader = &self.resources.shader_flat,
 
@@ -115,7 +123,12 @@ pub const DebugOverlay = struct {
                 .u_matrix_model_normal = object.model_matrix.transpose().inverse().toMat3(),
                 .u_color = object.color,
             });
-            object.model.draw();
+            c.glBindVertexArray(object.gl_vao);
+            c.glDrawArrays(
+                c.GL_TRIANGLES,
+                @intCast(object.vertex_first),
+                @intCast(object.vertices_count),
+            );
         }
 
         self.last_object_id = 0;

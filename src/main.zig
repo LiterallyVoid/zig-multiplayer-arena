@@ -721,14 +721,6 @@ pub fn main() !void {
             }
         }
 
-        // do.addObject(.{
-        //     .space = .world,
-        //     .model = &map,
-        //     .model_matrix = linalg.Mat4.identity(),
-        //     .shader = &shader,
-        //     .color = .{ 1.0, 0.0, 0.0, 1.0 },
-        // });
-
         // TODO: use an arena allocator here
         if (false) {
             var pose_1 = try model.blankPose(allocator);
