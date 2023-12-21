@@ -93,6 +93,9 @@ pub fn build(b: *std.build.Builder) !void {
 
         compile.addIncludePath(.{ .path = "deps/glfw/include/" });
         compile.linkLibrary(libglfw);
+
+        compile.addCSourceFile(.{ .file = .{ .path = "deps/stb/stb.c" }, .flags = &.{} });
+        compile.addIncludePath(.{ .path = "deps/stb/" });
     }
 
     b.installArtifact(exe);
