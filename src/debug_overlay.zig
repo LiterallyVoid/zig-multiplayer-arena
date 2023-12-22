@@ -232,8 +232,6 @@ pub const DebugOverlay = struct {
             const glyph_id = c.stbtt_FindGlyphIndex(&font.font, char);
             const glyph = font.cacheGlyph(glyph_id);
 
-            std.log.info("{}", .{glyph});
-
             const scale = size / font.size;
 
             self.texturedQuad(
