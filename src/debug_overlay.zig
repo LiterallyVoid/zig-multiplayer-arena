@@ -133,7 +133,9 @@ pub const DebugOverlay = struct {
         model_cone: Model,
 
         shader_flat: Shader,
-        shader_textured: Shader,
+
+        shader_text: Shader,
+        shader_ui_color: Shader,
     } = undefined,
 
     immediate_renderer: ImmediateRenderer,
@@ -211,26 +213,25 @@ pub const DebugOverlay = struct {
     }
 
     // rect, uvs: x1, y1, x2, y2
-    pub fn texturedQuad(self: *DebugOverlay, rect: [4]f32, uvs: [4]f32, matrix: linalg.Mat4, texture: ?c.GLuint) void {
-        const color = [4]u8{ 255, 255, 255, 255 };
+    pub fn texturedQuad(self: *DebugOverlay, pos: [4]f32, uvs: [4]f32, matrix: linalg.Mat4, shader: *const Shader, color: [4]u8, texture: ?c.GLuint) void {
         const corners = [_]ImmediateRenderer.Vertex{
             .{
-                .position = .{ rect[0], rect[1], 0.0 },
+                .position = .{ pos[0], pos[1], 0.0 },
                 .uv = .{ uvs[0], uvs[1] },
                 .color = color,
             },
             .{
-                .position = .{ rect[2], rect[1], 0.0 },
+                .position = .{ pos[2], pos[1], 0.0 },
                 .uv = .{ uvs[2], uvs[1] },
                 .color = color,
             },
             .{
-                .position = .{ rect[0], rect[3], 0.0 },
+                .position = .{ pos[0], pos[3], 0.0 },
                 .uv = .{ uvs[0], uvs[3] },
                 .color = color,
             },
             .{
-                .position = .{ rect[2], rect[3], 0.0 },
+                .position = .{ pos[2], pos[3], 0.0 },
                 .uv = .{ uvs[2], uvs[3] },
                 .color = color,
             },
@@ -245,7 +246,7 @@ pub const DebugOverlay = struct {
 
             .model_matrix = matrix,
 
-            .shader = &self.resources.shader_textured,
+            .shader = shader,
             .color = .{ 1.0, 1.0, 1.0, 1.0 },
 
             .gl_texture = texture,
@@ -265,14 +266,26 @@ pub const DebugOverlay = struct {
         self.addObject(object);
     }
 
-    pub fn text(self: *DebugOverlay, chars: []const u8, x_: f32, y_: f32, size: f32, font: *Font) void {
-        var x: f32 = x_;
+    pub fn text(self: *DebugOverlay, comptime fmt: []const u8, comptime args: anytype, x_: f32, y_: f32, gravity: f32, size: f32, font: *Font) void {
+        var chars_buf: [4096]u8 = undefined;
+        const chars = std.fmt.bufPrint(&chars_buf, fmt, args) catch "";
+
+        const scale = size / font.size;
+
+        var width: f32 = 0.0;
+        for (chars) |char| {
+            const glyph_id = c.stbtt_FindGlyphIndex(&font.font, char);
+            var advance: c_int = 0;
+            c.stbtt_GetGlyphHMetrics(&font.font, glyph_id, &advance, null);
+
+            width += @as(f32, @floatFromInt(advance)) * font.scale * scale;
+        }
+
+        var x: f32 = x_ - width * gravity;
         var y: f32 = y_;
         for (chars) |char| {
             const glyph_id = c.stbtt_FindGlyphIndex(&font.font, char);
             const glyph = font.cacheGlyph(glyph_id);
-
-            const scale = size / font.size;
 
             self.texturedQuad(
                 [_]f32{
@@ -283,6 +296,8 @@ pub const DebugOverlay = struct {
                 },
                 glyph.uv_rect,
                 linalg.Mat4.identity(),
+                &self.resources.shader_text,
+                .{ 255, 255, 255, 255 },
                 font.gl_texture,
             );
 
@@ -291,6 +306,22 @@ pub const DebugOverlay = struct {
 
             x += @as(f32, @floatFromInt(advance)) * font.scale * scale;
         }
+    }
+
+    pub fn rect(self: *DebugOverlay, x: f32, y: f32, width: f32, height: f32, color: [4]u8) void {
+        self.texturedQuad(
+            .{
+                x,
+                y,
+                x + width,
+                y + height,
+            },
+            .{ 0, 0, 0, 0 },
+            linalg.Mat4.identity(),
+            &self.resources.shader_ui_color,
+            color,
+            null,
+        );
     }
 
     pub fn flush(self: *DebugOverlay) void {

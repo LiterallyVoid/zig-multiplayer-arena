@@ -570,7 +570,7 @@ pub fn main() !void {
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     defer c.glfwTerminate();
 
-    const window = c.glfwCreateWindow(640, 480, "Awesome Zig Project", null, null) orelse
+    const window = c.glfwCreateWindow(1280, 720, "Awesome Zig Project", null, null) orelse
         return error.WindowCreationFailed;
 
     c.glfwMakeContextCurrent(window);
@@ -623,8 +623,11 @@ pub fn main() !void {
     do.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
     defer do.resources.shader_flat.deinit();
 
-    do.resources.shader_textured = try Shader.load(allocator, "zig-out/assets/debug/shader-textured");
-    defer do.resources.shader_textured.deinit();
+    do.resources.shader_text = try Shader.load(allocator, "zig-out/assets/debug/shader-textured");
+    defer do.resources.shader_text.deinit();
+
+    do.resources.shader_ui_color = try Shader.load(allocator, "zig-out/assets/debug/shader-ui-color");
+    defer do.resources.shader_ui_color.deinit();
 
     app.cam = Walkcam{
         .map_bmodel = &map_bmodel,
@@ -633,7 +636,7 @@ pub fn main() !void {
     app.font = try Font.load(
         allocator,
         "zig-out/assets/debug/font.otf",
-        .{ .size = 24.0, .atlas_size = 1024 },
+        .{ .size = 45.0, .atlas_size = 2048 },
     );
     // TODO: this should really be part of `App`
     defer app.font.deinit();
@@ -779,12 +782,25 @@ pub fn main() !void {
         //     app.font.gl_texture,
         // );
 
-        do.text("Hello world", 60.0, 60.0, 30.0, &app.font);
+        const size: [2]f32 = .{
+            @floatFromInt(width),
+            @floatFromInt(height),
+        };
+
+        do.text("Hello world", .{}, size[0] * 0.5, size[1] * 0.75, 0.5, 120.0, &app.font);
+        do.text("Command queue:", .{}, size[0] - 400.0, 30.0, 0.0, 30.0, &app.font);
+        do.rect(size[0] - 400.0, 50.0, 300.0, 20.0, .{ 0, 0, 0, 120 });
+
+        for (0..10) |i| {
+            do.rect(size[0] - 400.0 + @as(f32, @floatFromInt(i)) * 30.0, 50.0, 20.0, 20.0, .{ 0, 255, 0, 255 });
+        }
+
+        do.text("Interpolation queue:", .{}, size[0] - 400.0, 30.0 + 200.0, 0.0, 30.0, &app.font);
 
         do.projectionview_matrices = .{
             matrix_projectionview,
             matrix_viewmodel_projectionview,
-            linalg.Mat4.orthographic(0.0, @floatFromInt(width), 0.0, @floatFromInt(height), -1.0, 1.0),
+            linalg.Mat4.orthographic(0.0, size[0], 0.0, size[1], -1.0, 1.0),
         };
         do.flush();
 
