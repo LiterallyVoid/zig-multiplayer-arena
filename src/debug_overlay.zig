@@ -328,6 +328,7 @@ pub const DebugOverlay = struct {
                     .viewmodel_opaque,
                     => {
                         c.glDisable(c.GL_BLEND);
+                        c.glDepthMask(c.GL_TRUE);
                     },
 
                     .world_alpha,
@@ -336,6 +337,7 @@ pub const DebugOverlay = struct {
                     => {
                         c.glEnable(c.GL_BLEND);
                         c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
+                        c.glDepthMask(c.GL_FALSE);
                     },
                 }
 
@@ -359,6 +361,9 @@ pub const DebugOverlay = struct {
         }
 
         self.last_object_id = 0;
+
+        c.glDisable(c.GL_BLEND);
+        c.glDepthMask(c.GL_TRUE);
     }
 };
 

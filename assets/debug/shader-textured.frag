@@ -12,6 +12,5 @@ layout (location = 0) out vec4 f_main;
 void main() {
     float alpha = texture(u_texture, v_uv).r;
     alpha = clamp((alpha - 0.5) / fwidth(alpha) + 0.5, 0.0, 1.0);
-    if (alpha < 0.5) discard;
     f_main = u_color * alpha;
 }
