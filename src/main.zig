@@ -491,7 +491,7 @@ pub const App = struct {
     pub fn glfw_cursorPosCallback(window: ?*c.GLFWwindow, x: f64, y: f64) callconv(.C) void {
         const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
 
-        const event = self.event_translator.translateMousePosition(.{ @floatCast(x), @floatCast(y) });
+        const event = self.event_translator.translateMousePosition(.{ @as(f32, @floatCast(x)), @as(f32, @floatCast(y)) });
         _ = self.handleEvent(event);
     }
 
@@ -633,7 +633,7 @@ pub fn main() !void {
     app.font = try Font.load(
         allocator,
         "zig-out/assets/debug/font.otf",
-        .{ .size = 32.0, .atlas_size = 2048 },
+        .{ .size = 24.0, .atlas_size = 1024 },
     );
     // TODO: this should really be part of `App`
     defer app.font.deinit();
@@ -642,11 +642,6 @@ pub fn main() !void {
 
     var trace_origin = linalg.Vec3.zero();
     var trace_direction = linalg.Vec3.zero();
-
-    for (0..100) |i| {
-        // Assume that the 0..100 glyphs are kinda reasonable :)
-        app.font.cacheGlyph(@intCast(i));
-    }
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
@@ -777,16 +772,19 @@ pub fn main() !void {
 
         // map_bmodel.debug();
 
-        do.texturedQuad(
-            .{ 0, 0, 512.0, 512.0 },
-            .{ 0.0, 0.0, 1.0, 1.0 },
-            app.font.gl_texture,
-        );
+        // do.texturedQuad(
+        //     .{ 0, 0, 1024.0, 1024.0 },
+        //     .{ 0.0, 0.0, 1.0, 1.0 },
+        //     linalg.Mat4.identity(),
+        //     app.font.gl_texture,
+        // );
+
+        do.text("Hello world", 60.0, 60.0, 30.0, &app.font);
 
         do.projectionview_matrices = .{
             matrix_projectionview,
             matrix_viewmodel_projectionview,
-            linalg.Mat4.orthographic(0.0, @floatFromInt(width), @floatFromInt(height), 0.0, -1.0, 1.0),
+            linalg.Mat4.orthographic(0.0, @floatFromInt(width), 0.0, @floatFromInt(height), -1.0, 1.0),
         };
         do.flush();
 

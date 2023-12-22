@@ -5,6 +5,7 @@ const c = @import("./c.zig");
 
 const Shader = @import("./Shader.zig");
 const Model = @import("./Model.zig");
+const Font = @import("./Font.zig");
 
 pub const ImmediateRenderer = struct {
     pub const Vertex = struct {
@@ -170,7 +171,7 @@ pub const DebugOverlay = struct {
     }
 
     // rect, uvs: x1, y1, x2, y2
-    pub fn texturedQuad(self: *DebugOverlay, rect: [4]f32, uvs: [4]f32, texture: ?c.GLuint) void {
+    pub fn texturedQuad(self: *DebugOverlay, rect: [4]f32, uvs: [4]f32, matrix: linalg.Mat4, texture: ?c.GLuint) void {
         const color = [4]u8{ 255, 255, 255, 255 };
         const corners = [_]ImmediateRenderer.Vertex{
             .{
@@ -202,7 +203,7 @@ pub const DebugOverlay = struct {
             .vertex_first = @intCast(self.immediate_renderer.vertices.items.len),
             .vertices_count = 0,
 
-            .model_matrix = linalg.Mat4.identity(),
+            .model_matrix = matrix,
 
             .shader = &self.resources.shader_textured,
             .color = .{ 1.0, 1.0, 1.0, 1.0 },
@@ -222,6 +223,36 @@ pub const DebugOverlay = struct {
         object.vertices_count = @intCast(self.immediate_renderer.vertices.items.len - object.vertex_first);
 
         self.addObject(object);
+    }
+
+    pub fn text(self: *DebugOverlay, chars: []const u8, x_: f32, y_: f32, size: f32, font: *Font) void {
+        var x: f32 = x_;
+        var y: f32 = y_;
+        for (chars) |char| {
+            const glyph_id = c.stbtt_FindGlyphIndex(&font.font, char);
+            const glyph = font.cacheGlyph(glyph_id);
+
+            std.log.info("{}", .{glyph});
+
+            const scale = size / font.size;
+
+            self.texturedQuad(
+                [_]f32{
+                    glyph.rect[0] * scale + x,
+                    glyph.rect[1] * scale + y,
+                    glyph.rect[2] * scale + x,
+                    glyph.rect[3] * scale + y,
+                },
+                glyph.uv_rect,
+                linalg.Mat4.identity(),
+                font.gl_texture,
+            );
+
+            var advance: c_int = 0;
+            c.stbtt_GetGlyphHMetrics(&font.font, glyph_id, &advance, null);
+
+            x += @as(f32, @floatFromInt(advance)) * font.scale * scale;
+        }
     }
 
     pub fn flush(self: *DebugOverlay) void {

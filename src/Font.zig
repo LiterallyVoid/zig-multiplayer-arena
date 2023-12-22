@@ -16,6 +16,11 @@ allocator: std.mem.Allocator,
 
 font_bytes: []const u8,
 font: c.stbtt_fontinfo,
+
+/// This font's size in pixels.
+size: f32,
+
+/// This font's STBTT scale (idont know what that is!1)
 scale: f32,
 atlas_size: u32,
 
@@ -56,6 +61,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, options: Options) !S
         .allocator = allocator,
         .font_bytes = font_bytes,
         .font = font,
+        .size = options.size,
         .scale = c.stbtt_ScaleForPixelHeight(&font, options.size),
         .atlas_size = options.atlas_size,
         .gl_texture = gl_texture,
@@ -67,7 +73,12 @@ pub fn deinit(self: *Self) void {
     self.glyphs.deinit(self.allocator);
 }
 
-pub fn cacheGlyph(self: *Self, glyph: i32) void {
+pub fn cacheGlyph(self: *Self, glyph: i32) CachedGlyph {
+    const entry = self.glyphs.getOrPut(self.allocator, glyph) catch unreachable;
+    if (entry.found_existing) {
+        return entry.value_ptr.*;
+    }
+
     var offset: [2]c_int = .{ 0, 0 };
     var size: [2]c_int = .{ 0, 0 };
 
@@ -75,7 +86,7 @@ pub fn cacheGlyph(self: *Self, glyph: i32) void {
         &self.font,
         self.scale,
         glyph,
-        20,
+        6,
         128,
         20.0,
         &size[0],
@@ -143,5 +154,8 @@ pub fn cacheGlyph(self: *Self, glyph: i32) void {
             uv_pos_float[1] / atlas_size_float + size_float[1] / atlas_size_float,
         },
     };
-    _ = cached_glyph;
+
+    entry.value_ptr.* = cached_glyph;
+
+    return cached_glyph;
 }
