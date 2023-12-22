@@ -44,7 +44,7 @@ pub fn buildAssets(b: *std.build.Builder, step: *std.Build.Step) !void {
 
             step.dependOn(&exportFile.step);
             step.dependOn(&install_file.step);
-        } else if (std.mem.eql(u8, extension, ".vert") or std.mem.eql(u8, extension, ".frag") or std.mem.eql(u8, extension, ".glsl")) {
+        } else if (std.mem.eql(u8, extension, ".vert") or std.mem.eql(u8, extension, ".frag") or std.mem.eql(u8, extension, ".glsl") or std.mem.eql(u8, extension, ".otf")) {
             const dest_path = try std.mem.concat(
                 b.allocator,
                 u8,
