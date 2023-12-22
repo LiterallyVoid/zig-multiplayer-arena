@@ -66,10 +66,48 @@ pub const DebugOverlay = struct {
         ui,
 
         pub const max_enum = std.meta.fields(Space).len;
+
+        pub fn pass_opaque(self: Space) Pass {
+            return switch (self) {
+                .world => .world_opaque,
+                .viewmodel => .viewmodel_opaque,
+                .ui => .ui,
+            };
+        }
+    };
+
+    pub const Pass = enum(u8) {
+        first,
+
+        world_shadow,
+        world_opaque,
+        world_alpha,
+
+        viewmodel_opaque,
+        viewmodel_alpha,
+
+        ui,
+
+        pub fn space(self: Pass) Space {
+            return switch (self) {
+                .first => unreachable,
+
+                .world_shadow,
+                .world_opaque,
+                .world_alpha,
+                => .world,
+
+                .viewmodel_opaque,
+                .viewmodel_alpha,
+                => .viewmodel,
+
+                .ui => .ui,
+            };
+        }
     };
 
     pub const Object = struct {
-        space: Space,
+        pass: Pass,
 
         gl_vao: c.GLuint,
         vertex_first: u32,
@@ -117,6 +155,8 @@ pub const DebugOverlay = struct {
     }
 
     pub fn arrow(self: *DebugOverlay, space: Space, start: linalg.Vec3, dir: linalg.Vec3, color: [4]f32) void {
+        const pass = space.pass_opaque();
+
         var up = linalg.Vec3.new(0.0, 0.0, 1.0);
         const alternateUp = linalg.Vec3.new(1.0, 0.0, 0.0);
         if (@fabs(up.dot(dir)) > @fabs(alternateUp.dot(dir))) {
@@ -147,7 +187,7 @@ pub const DebugOverlay = struct {
             .multiply(linalg.Mat4.translation(0.0, 0.0, -1.0));
 
         self.addObject(.{
-            .space = space,
+            .pass = pass,
 
             .gl_vao = self.resources.model_cylinder.gl_vao,
             .vertex_first = 0,
@@ -158,7 +198,7 @@ pub const DebugOverlay = struct {
             .color = color,
         });
         self.addObject(.{
-            .space = space,
+            .pass = pass,
 
             .gl_vao = self.resources.model_cone.gl_vao,
             .vertex_first = 0,
@@ -197,7 +237,7 @@ pub const DebugOverlay = struct {
         };
 
         var object = Object{
-            .space = .ui,
+            .pass = .ui,
 
             .gl_vao = self.immediate_renderer.gl_vao,
             .vertex_first = @intCast(self.immediate_renderer.vertices.items.len),
@@ -265,9 +305,47 @@ pub const DebugOverlay = struct {
             self.objects_over_limit = 0;
         }
 
+        const SortContext = struct {
+            pub fn lessThan(this: @This(), a: Object, b: Object) bool {
+                _ = this;
+
+                return @intFromEnum(a.pass) < @intFromEnum(b.pass);
+            }
+        };
+
+        std.sort.block(Object, self.objects[0..self.last_object_id], SortContext{}, SortContext.lessThan);
+
+        var previous_pass: Pass = .first;
+
         for (self.objects[0..self.last_object_id]) |object| {
+            if (object.pass != previous_pass) {
+                switch (object.pass) {
+                    .first => unreachable,
+
+                    .world_shadow => {},
+
+                    .world_opaque,
+                    .viewmodel_opaque,
+                    => {
+                        c.glDisable(c.GL_BLEND);
+                    },
+
+                    .world_alpha,
+                    .viewmodel_alpha,
+                    .ui,
+                    => {
+                        c.glEnable(c.GL_BLEND);
+                        c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
+                    },
+                }
+
+                previous_pass = object.pass;
+            }
+
+            const space = object.pass.space();
+
             object.shader.bindWithUniforms(.{
-                .u_matrix_projectionview = self.projectionview_matrices[@intFromEnum(object.space)],
+                .u_matrix_projectionview = self.projectionview_matrices[@intFromEnum(space)],
                 .u_matrix_model = object.model_matrix,
                 .u_matrix_model_normal = object.model_matrix.transpose().inverse().toMat3(),
                 .u_color = object.color,
