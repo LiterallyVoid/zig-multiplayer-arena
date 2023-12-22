@@ -606,6 +606,8 @@ pub fn main() !void {
 
     var previous_time: f64 = 0.0;
 
+    do.* = debug_overlay.DebugOverlay.init(allocator);
+
     do.resources.model_cube = try Model.load(allocator, "zig-out/assets/debug/cube.model");
     defer do.resources.model_cube.deinit(allocator);
     do.resources.model_cube.upload();

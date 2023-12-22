@@ -14,6 +14,8 @@ scale: f32,
 
 glyphs: std.AutoHashMapUnmanaged(i32, CachedGlyph),
 
+gl_texture: c.GLuint,
+
 pub const Options = struct {
     size: f32,
     atlas_size: u32,
@@ -29,12 +31,20 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8, options: Options) !S
         return error.FontParsingFailed;
     }
 
+    const atlas_size_int: c_int = @intCast(options.atlas_size);
+
+    var gl_texture: c.GLuint = 0;
+    c.glGenTextures(1, &gl_texture);
+    c.glBindTexture(c.GL_TEXTURE_2D, gl_texture);
+    c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_R8, atlas_size_int, atlas_size_int, 0, c.GL_RED, c.GL_UNSIGNED_BYTE, null);
+
     return Self{
         .allocator = allocator,
         .font_bytes = font_bytes,
         .font = font,
         .scale = c.stbtt_ScaleForPixelHeight(&font, options.size),
         .glyphs = .{},
+        .gl_texture = gl_texture,
     };
 }
 

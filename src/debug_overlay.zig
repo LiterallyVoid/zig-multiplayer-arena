@@ -6,6 +6,58 @@ const c = @import("./c.zig");
 const Shader = @import("./Shader.zig");
 const Model = @import("./Model.zig");
 
+pub const ImmediateRenderer = struct {
+    pub const Vertex = struct {
+        position: [3]f32,
+        uv: [2]f32,
+        color: [4]u8,
+    };
+
+    gl_vao: c.GLuint,
+    gl_vbo: c.GLuint,
+    vertices: std.ArrayList(Vertex),
+
+    pub fn init(allocator: std.mem.Allocator) ImmediateRenderer {
+        var gl_vao: c.GLuint = undefined;
+        c.glGenVertexArrays(1, &gl_vao);
+        c.glBindVertexArray(gl_vao);
+
+        var gl_vbo: c.GLuint = undefined;
+        c.glGenBuffers(1, &gl_vbo);
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, gl_vbo);
+
+        c.glEnableVertexAttribArray(0);
+        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(@offsetOf(Vertex, "position")));
+
+        c.glEnableVertexAttribArray(4);
+        c.glVertexAttribPointer(4, 2, c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(@offsetOf(Vertex, "uv")));
+
+        c.glEnableVertexAttribArray(5);
+        c.glVertexAttribPointer(5, 4, c.GL_UNSIGNED_BYTE, c.GL_TRUE, @sizeOf(Vertex), @ptrFromInt(@offsetOf(Vertex, "color")));
+
+        c.glBindVertexArray(0);
+
+        return .{
+            .gl_vao = gl_vao,
+            .gl_vbo = gl_vbo,
+            .vertices = std.ArrayList(Vertex).init(allocator),
+        };
+    }
+
+    /// Upload vertices into the OpenGL VBO, and *also* clear `self.vertices`.
+    pub fn flush(self: *ImmediateRenderer) void {
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, self.gl_vbo);
+        c.glBufferData(
+            c.GL_ARRAY_BUFFER,
+            @intCast(@sizeOf(Vertex) * self.vertices.items.len),
+            self.vertices.items.ptr,
+            c.GL_STREAM_DRAW,
+        );
+
+        self.vertices.clearRetainingCapacity();
+    }
+};
+
 pub const DebugOverlay = struct {
     pub const Space = enum {
         world,
@@ -41,6 +93,14 @@ pub const DebugOverlay = struct {
 
         shader_flat: Shader,
     } = undefined,
+
+    immediate_renderer: ImmediateRenderer,
+
+    pub fn init(allocator: std.mem.Allocator) DebugOverlay {
+        return DebugOverlay{
+            .immediate_renderer = ImmediateRenderer.init(allocator),
+        };
+    }
 
     pub fn addObject(self: *DebugOverlay, object: Object) void {
         if (self.last_object_id >= self.objects.len) {
@@ -107,6 +167,8 @@ pub const DebugOverlay = struct {
     }
 
     pub fn flush(self: *DebugOverlay) void {
+        self.immediate_renderer.flush();
+
         if (self.objects_over_limit > 0) {
             std.log.err(
                 "debug renderer: rendering {} objects over limit of {}",
@@ -135,4 +197,4 @@ pub const DebugOverlay = struct {
     }
 };
 
-pub var singleton = DebugOverlay{};
+pub var singleton: DebugOverlay = undefined;
