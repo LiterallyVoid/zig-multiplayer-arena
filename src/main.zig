@@ -156,7 +156,7 @@ pub const Walkcam = struct {
         half_extents: linalg.Vec3 = linalg.Vec3.new(0.3, 0.3, 1.0),
 
         /// Basically random, to reduce the chance of steps breaking due to physics/float inaccuracy.
-        step_height: f32 = 0.2675,
+        step_height: f32 = 0.30514,
     };
     pub const State = enum {
         walk,
