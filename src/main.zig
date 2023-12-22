@@ -4,6 +4,7 @@ const c = @import("./c.zig");
 pub const linalg = @import("./linalg.zig");
 pub const Shader = @import("./Shader.zig");
 pub const Model = @import("./Model.zig");
+pub const Font = @import("./Font.zig");
 pub const collision = @import("./collision.zig");
 pub const debug_overlay = @import("./debug_overlay.zig");
 const do = &debug_overlay.singleton;
@@ -445,12 +446,17 @@ pub const App = struct {
 
     timescale: f32 = 1.0,
 
+    font: Font,
+
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
 
             // ugly hack: this will be set later
             .cam = undefined,
+
+            // also ugly hack: this will be set later
+            .font = undefined,
         };
     }
 
@@ -618,6 +624,14 @@ pub fn main() !void {
     app.cam = Walkcam{
         .map_bmodel = &map_bmodel,
     };
+
+    app.font = try Font.load(
+        allocator,
+        "zig-out/assets/debug/font.otf",
+        .{ .size = 32.0, .atlas_size = 2048 },
+    );
+    // TODO: this should really be part of `App`
+    defer app.font.deinit();
 
     // c.glEnable(c.GL_CULL_FACE);
 
