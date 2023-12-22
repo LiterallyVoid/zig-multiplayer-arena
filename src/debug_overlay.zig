@@ -77,6 +77,8 @@ pub const DebugOverlay = struct {
 
         shader: *const Shader,
         color: [4]f32,
+
+        gl_texture: ?c.GLuint = null,
     };
 
     projectionview_matrices: [Space.max_enum]linalg.Mat4 = undefined,
@@ -92,6 +94,7 @@ pub const DebugOverlay = struct {
         model_cone: Model,
 
         shader_flat: Shader,
+        shader_textured: Shader,
     } = undefined,
 
     immediate_renderer: ImmediateRenderer,
@@ -164,6 +167,61 @@ pub const DebugOverlay = struct {
 
             .color = color,
         });
+    }
+
+    // rect, uvs: x1, y1, x2, y2
+    pub fn texturedQuad(self: *DebugOverlay, rect: [4]f32, uvs: [4]f32, texture: ?c.GLuint) void {
+        const color = [4]u8{ 255, 255, 255, 255 };
+        const corners = [_]ImmediateRenderer.Vertex{
+            .{
+                .position = .{ rect[0], rect[1], 0.0 },
+                .uv = .{ uvs[0], uvs[1] },
+                .color = color,
+            },
+            .{
+                .position = .{ rect[2], rect[1], 0.0 },
+                .uv = .{ uvs[2], uvs[1] },
+                .color = color,
+            },
+            .{
+                .position = .{ rect[0], rect[3], 0.0 },
+                .uv = .{ uvs[0], uvs[3] },
+                .color = color,
+            },
+            .{
+                .position = .{ rect[2], rect[3], 0.0 },
+                .uv = .{ uvs[2], uvs[3] },
+                .color = color,
+            },
+        };
+
+        var object = Object{
+            .space = .ui,
+
+            .gl_vao = self.immediate_renderer.gl_vao,
+            .vertex_first = @intCast(self.immediate_renderer.vertices.items.len),
+            .vertices_count = 0,
+
+            .model_matrix = linalg.Mat4.identity(),
+
+            .shader = &self.resources.shader_textured,
+            .color = .{ 1.0, 1.0, 1.0, 1.0 },
+
+            .gl_texture = texture,
+        };
+
+        self.immediate_renderer.vertices.appendSlice(&.{
+            corners[0],
+            corners[1],
+            corners[3],
+            corners[3],
+            corners[2],
+            corners[0],
+        }) catch unreachable;
+
+        object.vertices_count = @intCast(self.immediate_renderer.vertices.items.len - object.vertex_first);
+
+        self.addObject(object);
     }
 
     pub fn flush(self: *DebugOverlay) void {

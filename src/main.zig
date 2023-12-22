@@ -623,6 +623,9 @@ pub fn main() !void {
     do.resources.shader_flat = try Shader.load(allocator, "zig-out/assets/debug/shader-flat");
     defer do.resources.shader_flat.deinit();
 
+    do.resources.shader_textured = try Shader.load(allocator, "zig-out/assets/debug/shader-textured");
+    defer do.resources.shader_textured.deinit();
+
     app.cam = Walkcam{
         .map_bmodel = &map_bmodel,
     };
@@ -639,6 +642,11 @@ pub fn main() !void {
 
     var trace_origin = linalg.Vec3.zero();
     var trace_direction = linalg.Vec3.zero();
+
+    for (0..100) |i| {
+        // Assume that the 0..100 glyphs are kinda reasonable :)
+        app.font.cacheGlyph(@intCast(i));
+    }
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
@@ -769,10 +777,16 @@ pub fn main() !void {
 
         // map_bmodel.debug();
 
+        do.texturedQuad(
+            .{ 0, 0, 512.0, 512.0 },
+            .{ 0.0, 0.0, 1.0, 1.0 },
+            app.font.gl_texture,
+        );
+
         do.projectionview_matrices = .{
             matrix_projectionview,
             matrix_viewmodel_projectionview,
-            undefined,
+            linalg.Mat4.orthographic(0.0, @floatFromInt(width), @floatFromInt(height), 0.0, -1.0, 1.0),
         };
         do.flush();
 
