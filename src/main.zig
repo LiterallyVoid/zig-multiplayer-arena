@@ -294,7 +294,6 @@ pub const NetChannel = struct {
             const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
 
             if (self.buffer_length < packet_length + 2) {
-                std.log.info("no packet in {}", .{self.buffer_length});
                 return null;
             }
 
@@ -613,9 +612,11 @@ pub const Client = struct {
     tick_remainder: f32 = 0.0,
 
     pub fn update(self: *Client, allocator: std.mem.Allocator, app: *const App, delta: f32) void {
-        self.input_bundler.update(app, delta);
+        const delta_warped = delta * self.timescale;
 
-        self.tick_remainder += delta;
+        self.input_bundler.update(app, delta_warped);
+
+        self.tick_remainder += delta_warped;
         if (self.tick_remainder > self.tick_length) {
             self.tick_remainder -= self.tick_length;
 
@@ -1527,6 +1528,13 @@ pub fn main() !void {
                         do.rect(x, 217.0, 18.0, 20.0 * frame.queued_ticks - 2.0, .{ 0, 255, 0, 255 });
                     } else {
                         do.rect(x, 217.0, 18.0, 18.0, .{ 255, 0, 0, 255 });
+                    }
+
+                    if (frame.slow) {
+                        do.rect(x, 216.0, 18.0, 50.0, .{ 96, 96, 0, 128 });
+                    }
+                    if (frame.fast) {
+                        do.rect(x, 216.0, 18.0, 50.0, .{ 0, 38, 96, 128 });
                     }
 
                     do.text("{}", .{frame.last_frame}, x + 10.0, 226.0, 0.5, 12.0, &app.font);
