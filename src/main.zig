@@ -130,9 +130,9 @@ pub const EventTranslator = struct {
     last_mouse_position: [2]f32 = .{ 0.0, 0.0 },
 
     pub fn translateMousePosition(self: *EventTranslator, absolute_: [2]f32) Event {
-        // TODO: surely everybody uses 1920x1080 windows and this wont come up later and ruin somebodys day
+        // TODO: use window size
         var absolute = absolute_;
-        absolute[1] = 1080.0 - absolute[1];
+        absolute[1] = -absolute[1];
 
         const relative = [2]f32{
             absolute[0] - self.last_mouse_position[0],
@@ -149,18 +149,69 @@ pub const EventTranslator = struct {
 };
 
 pub const CommandFrame = struct {
-    jump_time: f32,
+    movement: [3]f32 = .{ 0.0, 0.0, 0.0 },
+    look: [2]f32 = .{ 0.0, 0.0 },
 };
 
 pub const InputBundler = struct {
+    latest_command_frame: CommandFrame,
+    next_command_frame: CommandFrame,
+
+    pub fn init() InputBundler {
+        return .{
+            .latest_command_frame = .{},
+            .next_command_frame = .{},
+        };
+    }
+
+    pub fn handleEvent(self: *InputBundler, event: Event, app: *const App) bool {
+        // TODO: These should probably integrate angle now
+        self.next_command_frame.movement[0] =
+            app.actions[@intFromEnum(ActionId.forward)] -
+            app.actions[@intFromEnum(ActionId.back)];
+        self.next_command_frame.movement[1] =
+            app.actions[@intFromEnum(ActionId.left)] -
+            app.actions[@intFromEnum(ActionId.right)];
+        self.next_command_frame.movement[2] =
+            app.actions[@intFromEnum(ActionId.jump)] -
+            app.actions[@intFromEnum(ActionId.crouch)];
+
+        switch (event) {
+            .mouse_motion => |motion| {
+                self.latest_command_frame.look[0] += motion.relative[0] * 0.003;
+                self.latest_command_frame.look[1] += motion.relative[1] * 0.003;
+                self.next_command_frame.look[0] += motion.relative[0] * 0.003;
+                self.next_command_frame.look[1] += motion.relative[1] * 0.003;
+                return true;
+            },
+            .action => |action| switch (action.id) {
+                .forward,
+                .back,
+                .left,
+                .right,
+                .jump,
+                .crouch,
+                => return true,
+                else => return false,
+            },
+        }
+
+        return false;
+    }
+
     pub fn partial(self: *InputBundler) CommandFrame {
-        _ = self;
-        unreachable;
+        return self.latest_command_frame;
     }
 
     pub fn commit(self: *InputBundler) CommandFrame {
-        _ = self;
-        unreachable;
+        const frame = self.latest_command_frame;
+
+        self.latest_command_frame.look = .{ 0.0, 0.0 };
+        self.next_command_frame.look = .{ 0.0, 0.0 };
+
+        self.latest_command_frame = self.next_command_frame;
+
+        return frame;
     }
 };
 
@@ -188,62 +239,87 @@ pub const Walkcam = struct {
 
     map_bmodel: *collision.BrushModel,
 
-    actions: [6]f32 = .{0.0} ** 6,
-    fast: bool = false,
-    slow: bool = false,
-
     state: State = .fall,
 
     step_smooth: f32 = 0.0,
 
     pub fn update(self: *Walkcam, delta: f32, command_frame: CommandFrame) void {
-        _ = command_frame;
+        self.angle[0] += command_frame.look[0];
+        self.angle[1] += command_frame.look[1];
+
+        self.angle[0] = @rem(self.angle[0], std.math.tau);
+        self.angle[1] = std.math.clamp(
+            self.angle[1],
+            -std.math.pi * 0.5,
+            std.math.pi * 0.5,
+        );
+
         var speed: f32 = 10.0;
+        _ = speed;
 
-        if (self.fast) {
-            speed *= 5.0;
-        }
+        // if (self.fast) {
+        //     speed *= 5.0;
+        // }
 
-        if (self.slow) {
-            speed /= 2.0;
-        }
+        // if (self.slow) {
+        //     speed /= 2.0;
+        // }
 
+        const options = MoveOptions{};
+        _ = options;
+
+        self.forces(command_frame, delta * 0.5);
+        self.physics(delta);
+        self.forces(command_frame, delta * 0.5);
+
+        self.step_smooth *= std.math.exp(-delta * 18.0);
+    }
+
+    pub fn forces(self: *Walkcam, command_frame: CommandFrame, delta: f32) void {
         var move_2d = linalg.Vec2.new(
-            self.actions[2] - self.actions[3],
-            self.actions[0] - self.actions[1],
+            command_frame.movement[1],
+            command_frame.movement[0],
         );
 
         move_2d = move_2d.rotate(self.angle[0]);
         var move = move_2d.swizzle(linalg.Vec3, "xy0");
-        move.data[2] = self.actions[4] - self.actions[5];
+        move.data[2] = command_frame.movement[2];
 
-        const options = MoveOptions{};
-
-        if (self.state == .fly) {
-            self.flyForces(delta, move, speed * 10.0);
-            _ = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
-        } else if (self.state == .walk) {
-            self.walkForces(delta, move, speed, 200.0, 100.0);
-            if (walkMove(self.map_bmodel, options, &self.origin, &self.velocity, delta)) |walk_info| {
-                self.step_smooth += walk_info.step_jump;
-            } else {
-                self.state = .fall;
-                _ = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
-            }
-
-            if (self.actions[4] > 0.5) {
-                self.velocity.data[2] = 8.0;
-                self.state = .fall;
-            }
-        } else if (self.state == .fall) {
-            self.walkForces(delta, move, speed * 0.2, 80.0, 0.0);
-
-            if (flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta).on_ground) {
-                self.state = .walk;
-            }
+        switch (self.state) {
+            .fly => self.flyForces(delta, move, 100.0),
+            .walk => {
+                self.walkForces(delta, move, 10.0, 200.0, 100.0);
+                if (command_frame.movement[2] > 0.5) {
+                    self.state = .fall;
+                    self.velocity.data[2] = 10.0;
+                }
+            },
+            .fall => self.walkForces(delta, move, 2.0, 50.0, 0.0),
         }
+    }
 
-        self.step_smooth *= std.math.exp(-delta * 18.0);
+    pub fn physics(self: *Walkcam, delta: f32) void {
+        const options = MoveOptions{};
+        switch (self.state) {
+            .fly => {
+                _ = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+            },
+            .walk => {
+                const move = walkMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                if (move) |walk_info| {
+                    self.step_smooth += walk_info.step_jump;
+                } else {
+                    self.state = .fall;
+                    _ = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                }
+            },
+            .fall => {
+                const move = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                if (move.on_ground) {
+                    self.state = .walk;
+                }
+            },
+        }
     }
 
     pub fn flyMove(map: *collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
@@ -409,50 +485,6 @@ pub const Walkcam = struct {
         return linalg.Mat4.translationVec(self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5 - self.step_smooth)))
             .multiply(self.calculateBasis().toMat4());
     }
-
-    pub fn handleEvent(self: *Walkcam, event: Event) bool {
-        switch (event) {
-            .mouse_motion => |mouse_motion| {
-                self.angle[0] += mouse_motion.relative[0] * 0.003;
-                self.angle[1] += mouse_motion.relative[1] * 0.003;
-
-                self.angle[0] = @rem(self.angle[0], std.math.tau);
-                self.angle[1] = std.math.clamp(self.angle[1], -std.math.pi * 0.5, std.math.pi * 0.5);
-
-                return true;
-            },
-
-            .action => |action| {
-                switch (action.id) {
-                    .forward => self.actions[0] = action.value,
-                    .back => self.actions[1] = action.value,
-                    .left => self.actions[2] = action.value,
-                    .right => self.actions[3] = action.value,
-                    .jump => self.actions[4] = action.value,
-                    .crouch => self.actions[5] = action.value,
-
-                    .fly_fast => self.fast = action.pressed,
-                    .fly_slow => self.slow = action.pressed,
-
-                    .debug1 => if (action.pressed) {
-                        if (self.state == .fly) {
-                            self.state = .fall;
-                            std.debug.print("fly mode disabled\n", .{});
-                        } else {
-                            self.state = .fly;
-                            std.debug.print("fly mode enabled\n", .{});
-                        }
-                    },
-
-                    else => return false,
-                }
-
-                return true;
-            },
-        }
-
-        return false;
-    }
 };
 
 pub const App = struct {
@@ -471,7 +503,7 @@ pub const App = struct {
 
     font: Font,
 
-    tick_length: f32 = 1.0 / 16.0,
+    tick_length: f32 = 1.0 / 8.0,
 
     // How many seconds (<1 tick) that still need to be simulated.
     tick_remainder: f32 = 0.0,
@@ -514,6 +546,8 @@ pub const App = struct {
                     if (action.pressed) {
                         if (self.timescale > 0.7) {
                             self.timescale = 0.2;
+                        } else if (self.timescale > 0.15) {
+                            self.timescale = 0.01;
                         } else {
                             self.timescale = 1.0;
                         }
@@ -525,7 +559,8 @@ pub const App = struct {
 
             else => {},
         }
-        if (self.cam.handleEvent(event)) return true;
+
+        if (self.input_bundler.handleEvent(event, self)) return true;
 
         return false;
     }
@@ -832,6 +867,11 @@ pub fn main() !void {
         do.text("Hello world", .{}, size[0] * 0.5, size[1] * 0.75, 0.5, 120.0, &app.font);
         do.text("pos: {d}", .{app.cam_partial.origin}, 20.0, 20.0, 0.0, 16.0, &app.font);
         do.text("vel: {d}", .{app.cam_partial.velocity}, 20.0, 36.0, 0.0, 16.0, &app.font);
+        do.text("tick pos: {d}", .{app.cam.origin}, 20.0, 52.0, 0.0, 16.0, &app.font);
+        do.text("tick vel: {d}", .{app.cam.velocity}, 20.0, 68.0, 0.0, 16.0, &app.font);
+        do.text("tick distance: {d}", .{app.cam.origin.sub(app.cam_partial.origin).length()}, 20.0, 84.0, 0.0, 16.0, &app.font);
+        do.rect(20.0, 100.0, 300.0, 20.0, .{ 0, 0, 0, 160 });
+        do.rect(20.0, 100.0, 300.0 * (app.tick_remainder / app.tick_length), 20.0, .{ 255, 0, 0, 255 });
         // do.text("Command queue:", .{}, size[0] - 400.0, 30.0, 0.0, 30.0, &app.font);
         // do.rect(size[0] - 400.0, 50.0, 300.0, 20.0, .{ 0, 0, 0, 120 });
 
