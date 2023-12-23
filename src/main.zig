@@ -180,14 +180,8 @@ pub const CommandFrame = struct {
 };
 
 pub const InputBundler = struct {
-    latest_command_frame: CommandFrame,
+    latest_command_frame: CommandFrame = .{},
     latest_command_frame_fraction: f32 = 0.0,
-
-    pub fn init() InputBundler {
-        return .{
-            .latest_command_frame = .{},
-        };
-    }
 
     pub fn integrate(self: *InputBundler, frame: CommandFrame, length: f32) void {
         var ratio: f32 = 0.0;
@@ -296,7 +290,6 @@ pub const NetChannel = struct {
             const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
 
             if (self.buffer_length < packet_length + 2) {
-                std.log.info("not enough buffer: {}/{}", .{ self.buffer_length, packet_length + 2 });
                 return null;
             }
 
@@ -545,24 +538,45 @@ pub const Client = struct {
     /// Must be as long as server<->client round-trip latency.
     command_queue: RingBuffer(CommandFrame, 128) = .{},
     prediction: std.ArrayListUnmanaged(WorldState) = .{},
+    /// The partial prediction frame that should be displayed.
+    prediction_partial: WorldState = .{},
     prediction_dirty: bool = true,
 
     server_command_queue_health_debug: RingBuffer(CommandQueueHealthFrame, 60) = .{},
 
-    tick_length: f32 = 1.0 / 20.0,
+    input_bundler: InputBundler = .{},
 
-    pub fn update(self: *Client, allocator: std.mem.Allocator, delta: f32) void {
-        _ = delta;
+    tick_length: f32 = 1.0 / 20.0,
+    tick_remainder: f32 = 0.0,
+
+    pub fn update(self: *Client, allocator: std.mem.Allocator, app: *const App, delta: f32) void {
+        self.input_bundler.update(app, delta);
+
+        self.tick_remainder += delta;
+        if (self.tick_remainder > delta) {
+            const command_frame = self.input_bundler.commit();
+
+            self.tick(command_frame);
+            self.channel.sendTyped(ClientMessage, .{
+                .tick = .{
+                    .command_frame = command_frame,
+                },
+            });
+        }
+
         while (self.channel.pollTyped(ServerMessage, allocator)) |message| {
             self.handleMessage(message);
         }
+
+        // Use app.allocator, because the predictions list must last across frames.
+        self.predict(app.allocator, self.input_bundler.partial(), self.tick_remainder);
     }
 
     pub fn tick(self: *Client, frame: CommandFrame) void {
         self.command_queue.push(frame);
     }
 
-    pub fn predict(self: *Client, allocator: std.mem.Allocator) !void {
+    pub fn predict(self: *Client, allocator: std.mem.Allocator, partial_frame: CommandFrame, partial_remainder: f32) void {
         if (self.prediction_dirty) {
             self.prediction.clearRetainingCapacity();
         }
@@ -570,7 +584,7 @@ pub const Client = struct {
         var accumulator = self.prediction.getLastOrNull() orelse
             self.latest_world_state;
 
-        for (accumulator.entities) |*entity| {
+        for (&accumulator.entities) |*entity| {
             const ent_controller = entity.controller orelse {
                 entity.alive = false;
                 continue;
@@ -585,17 +599,24 @@ pub const Client = struct {
             const index: u32 = @intCast(self.prediction.items.len);
             const command_frame = self.command_queue.peek(index).?;
 
-            for (accumulator.entities) |*entity| {
+            for (&accumulator.entities) |*entity| {
                 if (!entity.alive) continue;
                 switch (entity.entity) {
-                    .player => |player| player.update(self.tick_length, command_frame),
+                    .player => |*player| player.update(self.tick_length, command_frame),
                 }
             }
 
-            try self.prediction.append(allocator, accumulator);
+            self.prediction.append(allocator, accumulator) catch unreachable;
         }
 
-        return accumulator;
+        for (&accumulator.entities) |*entity| {
+            if (!entity.alive) continue;
+            switch (entity.entity) {
+                .player => |*player| player.update(partial_remainder, partial_frame),
+            }
+        }
+
+        self.prediction_partial = accumulator;
     }
 
     pub fn handleMessage(self: *Client, message: ServerMessage) void {
@@ -908,7 +929,7 @@ pub const App = struct {
 
     event_translator: EventTranslator = .{},
 
-    input_bundler: InputBundler,
+    input_bundler: InputBundler = .{},
 
     cam: Walkcam,
     cam_partial: Walkcam,
@@ -929,8 +950,6 @@ pub const App = struct {
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
-
-            .input_bundler = InputBundler.init(),
 
             // ugly hack: this will be set later
             .cam = undefined,
@@ -958,7 +977,7 @@ pub const App = struct {
         self.cam_partial.update(self.tick_remainder, command_frame);
 
         if (self.client) |*client| {
-            client.update(self.allocator, delta);
+            client.update(self.allocator, self, delta);
         }
     }
 
