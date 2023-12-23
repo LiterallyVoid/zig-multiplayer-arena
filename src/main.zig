@@ -520,7 +520,6 @@ pub const Server = struct {
         _ = self;
         switch (message) {
             .tick => |tick_info| {
-                std.log.info("got tick {}", .{tick_info.command_frame.random});
                 client.command_queue.push(tick_info.command_frame);
             },
         }
@@ -535,7 +534,6 @@ pub const Server = struct {
         for (self.clients.items) |*client| {
             const cqlen = client.command_queue.length;
             const command_frame = client.command_queue.pop() orelse CommandFrame{};
-            std.log.info("cqlen: {}, simulating {}", .{ cqlen, command_frame.random });
             const entity = self.world.get(client.entity) orelse {
                 std.log.warn("client has no entity?", .{});
 
@@ -636,7 +634,6 @@ pub const Client = struct {
     }
 
     pub fn tick(self: *Client, frame: CommandFrame) void {
-        std.log.info("sending frame {}", .{frame.random});
         self.command_queue.push(frame);
         self.channel.sendTyped(ClientMessage, .{
             .tick = .{
