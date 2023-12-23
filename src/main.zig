@@ -705,10 +705,10 @@ pub const Client = struct {
 
                 if (queued_ticks < 0.5) {
                     fast = true;
-                    self.timescale = 1.05;
+                    self.timescale = 1.15;
                 } else if (queued_ticks > 1.5) {
                     slow = true;
-                    self.timescale = 0.95;
+                    self.timescale = 0.85;
                 }
 
                 self.server_command_queue_health_debug.push(.{
@@ -1528,10 +1528,10 @@ pub fn main() !void {
                     }
 
                     if (frame.slow) {
-                        do.rect(x, 216.0, 18.0, 50.0, .{ 96, 96, 0, 128 });
+                        do.rect(x, 216.0, 18.0, 150.0, .{ 96, 96, 0, 128 });
                     }
                     if (frame.fast) {
-                        do.rect(x, 216.0, 18.0, 50.0, .{ 0, 38, 96, 128 });
+                        do.rect(x, 216.0, 18.0, 150.0, .{ 0, 38, 96, 128 });
                     }
 
                     do.text("{}", .{frame.last_frame}, x + 10.0, 226.0, 0.5, 12.0, &app.font);
