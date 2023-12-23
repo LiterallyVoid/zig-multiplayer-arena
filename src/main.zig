@@ -195,7 +195,7 @@ pub const InputBundler = struct {
     }
 
     pub fn update(self: *InputBundler, app: *const App, slice_length: f32) void {
-        // TODO: These should probably integrate angle now
+        // TODO: These should probably take angle into account now
         const slice_frame = .{
             .movement = .{
                 app.actions[@intFromEnum(ActionId.forward)] -
