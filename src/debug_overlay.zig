@@ -266,7 +266,7 @@ pub const DebugOverlay = struct {
         self.addObject(object);
     }
 
-    pub fn text(self: *DebugOverlay, comptime fmt: []const u8, comptime args: anytype, x_: f32, y_: f32, gravity: f32, size: f32, font: *Font) void {
+    pub fn text(self: *DebugOverlay, comptime fmt: []const u8, args: anytype, x_: f32, y_: f32, gravity: f32, size: f32, font: *Font) void {
         var chars_buf: [4096]u8 = undefined;
         const chars = std.fmt.bufPrint(&chars_buf, fmt, args) catch "";
 

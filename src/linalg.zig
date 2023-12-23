@@ -107,7 +107,7 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
                 if (i > 0) {
                     try std.fmt.format(out_stream, ", ", .{});
                 }
-                try std.fmt.format(out_stream, "{d}", .{elem});
+                try std.fmt.format(out_stream, "{d:.2}", .{elem});
             }
             try std.fmt.format(out_stream, ")", .{});
         }
