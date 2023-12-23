@@ -747,6 +747,8 @@ pub const Client = struct {
                 }
 
                 self.prediction_dirty = true;
+
+                self.interpolation_queue.push(self.latest_world_state);
             },
         }
     }
@@ -1397,11 +1399,29 @@ pub fn main() !void {
 
         var matrix_camera = app.cam_partial.cameraMatrix();
         if (app.client) |client| {
+            var camera_entity: EntityId = .{ .index = 0xFF_FF, .revision = 0xFF_FF }; // TODO: make this sentinel standard
             for (client.prediction_partial.entities) |entity| {
                 if (!entity.alive) continue;
                 if (entity.entity == .player) {
                     matrix_camera = entity.entity.player.cameraMatrix();
+                    camera_entity = entity.id;
                 }
+            }
+            for (client.latest_world_state.entities) |entity| {
+                if (!entity.alive) continue;
+                if (std.meta.eql(entity.id, camera_entity)) continue;
+
+                do.addObject(.{
+                    .pass = .world_opaque,
+                    .gl_vao = do.resources.model_cube.gl_vao,
+                    .vertex_first = 0,
+                    .vertices_count = do.resources.model_cube.vertices_count,
+                    .model_matrix = linalg.Mat4.translationVec(entity.entity.player.origin)
+                        .multiply(linalg.Mat4.scaleVec(linalg.Vec3.new(0.6, 0.6, 2.0))),
+                    .shader = &do.resources.shader_flat,
+                    .color = .{ 1.0, 1.0, 1.0, 1.0 },
+                    .gl_texture = null,
+                });
             }
         }
 
