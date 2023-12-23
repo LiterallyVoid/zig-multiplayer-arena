@@ -148,6 +148,22 @@ pub const EventTranslator = struct {
     }
 };
 
+pub const CommandFrame = struct {
+    jump_time: f32,
+};
+
+pub const InputBundler = struct {
+    pub fn partial(self: *InputBundler) CommandFrame {
+        _ = self;
+        unreachable;
+    }
+
+    pub fn commit(self: *InputBundler) CommandFrame {
+        _ = self;
+        unreachable;
+    }
+};
+
 pub const Walkcam = struct {
     pub const MoveOptions = struct {
         /// steepest angle = acos(floor_max_slope); 0.8 slope ~= 36 degrees
@@ -158,12 +174,14 @@ pub const Walkcam = struct {
         /// Basically random, to reduce the chance of steps breaking due to physics/float inaccuracy.
         step_height: f32 = 0.30514,
     };
+
     pub const State = enum {
         walk,
         fall,
 
         fly,
     };
+
     origin: linalg.Vec3 = linalg.Vec3.new(0.0, 0.0, 25.0),
     velocity: linalg.Vec3 = linalg.Vec3.zero(),
     angle: [2]f32 = .{ 0.0, 0.0 },
@@ -178,7 +196,8 @@ pub const Walkcam = struct {
 
     step_smooth: f32 = 0.0,
 
-    pub fn update(self: *Walkcam, delta: f32) void {
+    pub fn update(self: *Walkcam, delta: f32, command_frame: CommandFrame) void {
+        _ = command_frame;
         var speed: f32 = 10.0;
 
         if (self.fast) {
@@ -440,7 +459,11 @@ pub const App = struct {
     allocator: std.mem.Allocator,
 
     event_translator: EventTranslator = .{},
+
+    input_bundler: InputBundler,
+
     cam: Walkcam,
+    cam_partial: Walkcam,
 
     actions: [ActionId.max_enum]f32 = .{0.0} ** ActionId.max_enum,
 
@@ -448,12 +471,20 @@ pub const App = struct {
 
     font: Font,
 
+    tick_length: f32 = 1.0 / 16.0,
+
+    // How many seconds (<1 tick) that still need to be simulated.
+    tick_remainder: f32 = 0.0,
+
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
 
+            .input_bundler = InputBundler.init(),
+
             // ugly hack: this will be set later
             .cam = undefined,
+            .cam_partial = undefined,
 
             // also ugly hack: this will be set later
             .font = undefined,
@@ -461,7 +492,18 @@ pub const App = struct {
     }
 
     pub fn update(self: *App, delta: f32) void {
-        self.cam.update(delta * self.timescale);
+        self.tick_remainder += delta * self.timescale;
+        if (self.tick_remainder > self.tick_length) {
+            const command_frame = self.input_bundler.commit();
+
+            self.tick_remainder -= self.tick_length;
+            self.cam.update(self.tick_length, command_frame);
+        }
+
+        const command_frame = self.input_bundler.partial();
+
+        self.cam_partial = self.cam;
+        self.cam_partial.update(self.tick_remainder, command_frame);
     }
 
     pub fn handleEvent(self: *App, event: Event) bool {
@@ -689,7 +731,7 @@ pub fn main() !void {
         });
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(linalg.Mat4.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), std.math.pi * 0.5));
 
-        const matrix_camera = app.cam.cameraMatrix();
+        const matrix_camera = app.cam_partial.cameraMatrix();
 
         matrix_projectionview = matrix_projectionview.multiply(matrix_camera.inverse());
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(matrix_camera.inverse());
@@ -788,14 +830,16 @@ pub fn main() !void {
         };
 
         do.text("Hello world", .{}, size[0] * 0.5, size[1] * 0.75, 0.5, 120.0, &app.font);
-        do.text("Command queue:", .{}, size[0] - 400.0, 30.0, 0.0, 30.0, &app.font);
-        do.rect(size[0] - 400.0, 50.0, 300.0, 20.0, .{ 0, 0, 0, 120 });
+        do.text("pos: {d}", .{app.cam_partial.origin}, 20.0, 20.0, 0.0, 16.0, &app.font);
+        do.text("vel: {d}", .{app.cam_partial.velocity}, 20.0, 36.0, 0.0, 16.0, &app.font);
+        // do.text("Command queue:", .{}, size[0] - 400.0, 30.0, 0.0, 30.0, &app.font);
+        // do.rect(size[0] - 400.0, 50.0, 300.0, 20.0, .{ 0, 0, 0, 120 });
 
-        for (0..10) |i| {
-            do.rect(size[0] - 400.0 + @as(f32, @floatFromInt(i)) * 30.0, 50.0, 20.0, 20.0, .{ 0, 255, 0, 255 });
-        }
+        // for (0..10) |i| {
+        //     do.rect(size[0] - 400.0 + @as(f32, @floatFromInt(i)) * 30.0, 50.0, 20.0, 20.0, .{ 0, 255, 0, 255 });
+        // }
 
-        do.text("Interpolation queue:", .{}, size[0] - 400.0, 30.0 + 200.0, 0.0, 30.0, &app.font);
+        // do.text("Interpolation queue:", .{}, size[0] - 400.0, 30.0 + 200.0, 0.0, 30.0, &app.font);
 
         do.projectionview_matrices = .{
             matrix_projectionview,
