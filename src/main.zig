@@ -736,14 +736,14 @@ pub const Client = struct {
                 }
 
                 if (!found_current) {
-                    std.log.err("error: command queue desync?", .{});
-                    std.log.err("error: server just simulated {}", .{report.last_frame});
-                    var my_frames: [512]u8 = undefined;
-                    for (0..self.command_queue.length) |index| {
-                        const item = self.command_queue.peek(@intCast(index)) orelse continue;
-                        my_frames[index] = item.random;
-                    }
-                    std.log.err("my frames: {any}", .{my_frames[0..self.command_queue.length]});
+                    // std.log.err("error: command queue desync?", .{});
+                    // std.log.err("error: server just simulated {}", .{report.last_frame});
+                    // var my_frames: [512]u8 = undefined;
+                    // for (0..self.command_queue.length) |index| {
+                    //     const item = self.command_queue.peek(@intCast(index)) orelse continue;
+                    //     my_frames[index] = item.random;
+                    // }
+                    // std.log.err("my frames: {any}", .{my_frames[0..self.command_queue.length]});
                 }
 
                 self.prediction_dirty = true;
@@ -1128,6 +1128,8 @@ pub const App = struct {
         _ = mods;
         const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
 
+        c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+
         const action_id: ActionId = switch (button) {
             c.GLFW_MOUSE_BUTTON_LEFT => .attack1,
             c.GLFW_MOUSE_BUTTON_RIGHT => .attack2,
@@ -1151,6 +1153,10 @@ pub const App = struct {
     pub fn glfw_keyCallback(window: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
         _ = scancode;
         _ = mods;
+
+        if (key == c.GLFW_KEY_ESCAPE) {
+            c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
+        }
 
         const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
 
@@ -1300,8 +1306,6 @@ pub fn main() !void {
     var model = try Model.load(allocator, "zig-out/assets/x/hand.model");
     model.upload();
     defer model.deinit(allocator);
-
-    c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
 
     var previous_time: f64 = 0.0;
 
