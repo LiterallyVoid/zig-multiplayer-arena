@@ -1050,6 +1050,8 @@ pub const App = struct {
 
     client: ?Client = null,
 
+    captured: bool = false,
+
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
@@ -1120,7 +1122,10 @@ pub const App = struct {
         const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
 
         const event = self.event_translator.translateMousePosition(.{ @as(f32, @floatCast(x)), @as(f32, @floatCast(y)) });
-        _ = self.handleEvent(event);
+
+        if (self.captured) {
+            _ = self.handleEvent(event);
+        }
     }
 
     // TODO: Actions aren't combined
@@ -1129,6 +1134,7 @@ pub const App = struct {
         const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
 
         c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+        self.captured = true;
 
         const action_id: ActionId = switch (button) {
             c.GLFW_MOUSE_BUTTON_LEFT => .attack1,
@@ -1154,11 +1160,12 @@ pub const App = struct {
         _ = scancode;
         _ = mods;
 
+        const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
+
         if (key == c.GLFW_KEY_ESCAPE) {
             c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
+            self.captured = false;
         }
-
-        const self: *App = @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window).?));
 
         const action_id: ActionId = switch (key) {
             c.GLFW_KEY_E => .forward,
