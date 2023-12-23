@@ -260,7 +260,61 @@ pub const InputBundler = struct {
     }
 };
 
-pub fn RingBuffer(comptime T: type, comptime limit: usize) type {
+pub const NetChannel = struct {
+    const MAX_MESSAGE_LENGTH = 2048;
+
+    tcp_stream: std.net.Stream,
+    buffer: [MAX_MESSAGE_LENGTH]u8,
+    buffer_length: usize,
+
+    pub fn send(self: NetChannel, message: []const u8) void {
+        var length = std.mem.writeIntLittle(u16, @intCast(message.len));
+        self.tcp_stream.write(length);
+        self.tcp_stream.write(message);
+    }
+
+    pub fn poll(self: *NetChannel, buffer: *[MAX_MESSAGE_LENGTH]u8) ?[]u8 {
+        if (self.buffer_length < self.buffer.len) {
+            const amt = self.tcp_stream.read(self.buffer[self.buffer_length..]) catch |err| {
+                std.log.err("got error while reading from socket: {}", .{err});
+                return null;
+            };
+            self.buffer_length += amt;
+        }
+
+        if (self.buffer_length >= 2) {
+            const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
+
+            if (self.buffer_length >= packet_length + 2) {
+                std.mem.copy(u8, buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
+                return buffer[0..packet_length];
+            }
+        }
+
+        return null;
+    }
+
+    pub fn sendTyped(self: NetChannel, comptime T: type, message: T) void {
+        var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
+        var writer = std.io.fixedBufferStream(&buffer);
+        const encoded = std.json.stringify(message, .{}, writer) catch unreachable;
+
+        std.log.info("sending JSON packet: {s}", .{encoded});
+
+        self.send(encoded);
+    }
+
+    pub fn pollTyped(self: *NetChannel, comptime T: type, allocator: std.mem.Allocator) ?T {
+        var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
+        const bytes = self.poll(&buffer) orelse return null;
+
+        std.log.info("received JSON packet: {s}", .{bytes});
+
+        return std.json.parseFromSliceLeaky(T, allocator, bytes, .{}) catch unreachable;
+    }
+};
+
+pub fn RingBuffer(comptime T: type, comptime limit: u32) type {
     return struct {
         const Self = @This();
 
@@ -346,6 +400,10 @@ pub const WorldState = struct {
 
 /// A server's idea of what a client is.
 pub const ServerClient = struct {
+    id: u32,
+
+    channel: NetChannel,
+
     entity: EntityId,
     command_queue: RingBuffer(CommandFrame, 8),
 
@@ -355,6 +413,10 @@ pub const ServerClient = struct {
 
 /// All commands that the server can send to the client.
 pub const ServerMessage = union(enum) {
+    hello: struct {
+        your_id: u32,
+        tick_length: f32,
+    },
     entity_refresh: struct {
         slot: u32,
         data: Entity,
@@ -366,21 +428,55 @@ pub const ServerMessage = union(enum) {
 };
 
 pub const Server = struct {
+    allocator: std.mem.Allocator,
+
     map: *collision.BrushModel,
 
     world: WorldState = .{},
-    clients: std.ArrayList(ServerClient),
+    clients: std.ArrayListUnmanaged(ServerClient) = .{},
+
+    latest_client_id: u32 = 0,
 
     tick_length: f32 = 1.0 / 20.0,
 
     pub fn init(allocator: std.mem.Allocator, map: *collision.BrushModel) Server {
         return Server{
+            .allocator = allocator,
             .map = map,
-            .clients = std.ArrayList(ServerClient).init(allocator),
         };
     }
 
+    pub fn handleConnect(self: *Server, channel: NetChannel) !void {
+        const id = self.latest_client_id;
+        self.latest_client_id += 1;
+
+        const entity = self.world.spawn().?;
+        entity.entity = .{ .player = .{} };
+
+        try self.clients.append(self.allocator, .{
+            .id = id,
+            .channel = channel,
+            .entity = entity.id,
+            .command_queue = .{},
+            .world_state_pending = .{},
+        });
+    }
+
+    fn handleMessage(self: *Server, client: *ServerClient, message: ClientMessage) void {
+        _ = self;
+        switch (message) {
+            .tick => |tick_info| {
+                client.command_queue.push(tick_info.command_frame);
+            },
+        }
+    }
+
     pub fn tick(self: *Server) void {
+        for (self.clients.items) |*client| {
+            while (client.channel.pollTyped(ClientMessage, self.allocator)) |message| {
+                self.handleMessage(client, message);
+            }
+        }
         for (self.clients.items) |*client| {
             const command_frame = client.command_queue.pop() orelse CommandFrame{};
             const entity = self.world.get(client.entity) orelse {
@@ -408,23 +504,67 @@ pub const Client = struct {
         queued_ticks: f32,
     };
 
+    /// Must be synced to server's ID of self
+    id: u32 = 0,
+
     interpolation_queue: RingBuffer(WorldState, 8) = .{},
     latest_world_state: WorldState = .{},
 
     /// Must be as long as server<->client round-trip latency.
     command_queue: RingBuffer(CommandFrame, 128),
     prediction: std.ArrayListUnmanaged(WorldState) = .{},
+    prediction_dirty: bool = true,
 
     server_command_queue_health_debug: RingBuffer(CommandQueueHealthFrame, 60) = .{},
 
-    tick_rate: f32 = 1.0 / 20.0,
+    tick_length: f32 = 1.0 / 20.0,
 
     pub fn tick(self: *Client, frame: CommandFrame) void {
         self.command_queue.push(frame);
     }
 
+    pub fn predict(self: *Client, allocator: std.mem.Allocator) !void {
+        if (self.prediction_dirty) {
+            self.prediction.clearRetainingCapacity();
+        }
+
+        var accumulator = self.prediction.getLastOrNull() orelse
+            self.latest_world_state;
+
+        for (accumulator.entities) |*entity| {
+            const ent_controller = entity.controller orelse {
+                entity.alive = false;
+                continue;
+            };
+
+            if (ent_controller != self.id) {
+                entity.alive = false;
+            }
+        }
+
+        while (self.prediction.items.len < self.command_queue.length) {
+            const index: u32 = @intCast(self.prediction.items.len);
+            const command_frame = self.command_queue.peek(index).?;
+
+            for (accumulator.entities) |*entity| {
+                if (!entity.alive) continue;
+                switch (entity.entity) {
+                    .player => |player| player.update(self.tick_length, command_frame),
+                }
+            }
+
+            try self.prediction.append(allocator, accumulator);
+        }
+
+        return accumulator;
+    }
+
     pub fn handleMessage(self: *Client, message: ServerMessage) void {
         switch (message) {
+            .hello => |hello| {
+                self.id = hello.your_id;
+                self.tick_length = hello.tick_length;
+            },
             .entity_refresh => |refresh| {
                 self.latest_world_state.entities[refresh.slot] = refresh.data;
             },
@@ -437,6 +577,8 @@ pub const Client = struct {
                 while (self.command_queue.length > report.command_queue_length) {
                     _ = self.command_queue.pop();
                 }
+
+                self.prediction_dirty = true;
             },
         }
     }
@@ -881,6 +1023,58 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     var allocator = gpa.allocator();
 
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    var addr: ?std.net.Address = null;
+
+    _ = args.next();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--addr")) {
+            const ip_and_port = args.next().?;
+
+            var ip: []const u8 = ip_and_port;
+            var port: u16 = 27043;
+
+            if (std.mem.indexOfScalar(u8, ip_and_port, ':')) |colon| {
+                ip = ip_and_port[0..colon];
+                port = std.fmt.parseInt(u16, ip_and_port[colon + 1 ..], 10) catch unreachable;
+            }
+
+            addr = std.net.Address.resolveIp(ip, port);
+        }
+
+        if (std.mem.eql(u8, arg, "--dedicated")) {
+            std.log.info("Doing a busy loop", .{});
+
+            _ = c.glfwInit();
+            defer c.glfwTerminate();
+
+            var map = try Model.load(allocator, "zig-out/assets/x/test-map.model");
+            defer map.deinit(allocator);
+
+            var map_bmodel = try collision.BrushModel.fromModelVertices(allocator, map.vertices);
+            defer map_bmodel.deinit(allocator);
+
+            var server = Server.init(allocator, &map_bmodel);
+
+            var remainder: f32 = 0.0;
+
+            var previous_time: f64 = c.glfwGetTime();
+            while (true) {
+                const time = c.glfwGetTime();
+                const delta: f32 = @floatCast(time - previous_time);
+                previous_time = time;
+
+                remainder += delta;
+                while (remainder > server.tick_length) {
+                    remainder -= server.tick_length;
+                    server.tick();
+                }
+            }
+        }
+    }
+
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     defer c.glfwTerminate();
 
@@ -943,8 +1137,6 @@ pub fn main() !void {
     do.resources.shader_ui_color = try Shader.load(allocator, "zig-out/assets/debug/shader-ui-color");
     defer do.resources.shader_ui_color.deinit();
 
-    var server = Server.init(allocator, &map_bmodel);
-
     app.cam = Walkcam{
         .map_bmodel = &map_bmodel,
     };
@@ -962,18 +1154,10 @@ pub fn main() !void {
     var trace_origin = linalg.Vec3.zero();
     var trace_direction = linalg.Vec3.zero();
 
-    var server_tick_remainder: f32 = 0.0;
-
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
         var delta: f32 = @floatCast(time - previous_time);
         previous_time = time;
-
-        server_tick_remainder += delta;
-        while (server_tick_remainder > server.tick_length) {
-            server_tick_remainder -= server.tick_length;
-            server.tick();
-        }
 
         var width: c_int = 0;
         var height: c_int = 0;
