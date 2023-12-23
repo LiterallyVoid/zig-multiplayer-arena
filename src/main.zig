@@ -296,12 +296,14 @@ pub const NetChannel = struct {
             const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
 
             if (self.buffer_length < packet_length + 2) {
+                std.log.info("not enough buffer: {}/{}", .{ self.buffer_length, packet_length + 2 });
                 return null;
             }
 
             std.mem.copy(u8, buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
 
             std.mem.copyForwards(u8, &self.buffer, self.buffer[packet_length + 2 ..]);
+            self.buffer_length -= packet_length + 2;
 
             return buffer[0..packet_length];
         }
@@ -500,6 +502,7 @@ pub const Server = struct {
             }
         }
         for (self.clients.items) |*client| {
+            const cqlen = client.command_queue.length;
             const command_frame = client.command_queue.pop() orelse CommandFrame{};
             const entity = self.world.get(client.entity) orelse {
                 std.log.warn("client has no entity?", .{});
@@ -510,6 +513,11 @@ pub const Server = struct {
             switch (entity.entity) {
                 .player => |*player| player.update(self.tick_length, command_frame),
             }
+
+            client.channel.sendTyped(ServerMessage, .{ .tick_report = .{
+                .command_queue_length = cqlen,
+                .time_since_receiving_command = 0.0,
+            } });
         }
     }
 };
