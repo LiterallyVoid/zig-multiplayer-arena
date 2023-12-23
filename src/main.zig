@@ -264,8 +264,8 @@ pub const NetChannel = struct {
     const MAX_MESSAGE_LENGTH = 2048;
 
     tcp_stream: std.net.Stream,
-    buffer: [MAX_MESSAGE_LENGTH]u8,
-    buffer_length: usize,
+    buffer: [MAX_MESSAGE_LENGTH]u8 = undefined,
+    buffer_length: usize = 0,
 
     pub fn send(self: NetChannel, message: []const u8) void {
         var length = std.mem.writeIntLittle(u16, @intCast(message.len));
@@ -285,10 +285,15 @@ pub const NetChannel = struct {
         if (self.buffer_length >= 2) {
             const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
 
-            if (self.buffer_length >= packet_length + 2) {
-                std.mem.copy(u8, buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
-                return buffer[0..packet_length];
+            if (self.buffer_length < packet_length + 2) {
+                return null;
             }
+
+            std.mem.copy(u8, buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
+
+            std.mem.copyForwards(u8, &self.buffer, self.buffer[packet_length + 2 ..]);
+
+            return buffer[0..packet_length];
         }
 
         return null;
@@ -318,10 +323,10 @@ pub fn RingBuffer(comptime T: type, comptime limit: u32) type {
     return struct {
         const Self = @This();
 
-        items: [limit]T,
+        items: [limit]T = undefined,
 
-        length: u32,
-        insert_head: u32,
+        length: u32 = 0,
+        insert_head: u32 = 0,
 
         pub fn push(self: *Self, item: T) void {
             self.insert_head = (self.insert_head + 1) % limit;
@@ -507,11 +512,13 @@ pub const Client = struct {
     /// Must be synced to server's ID of self
     id: u32 = 0,
 
+    channel: NetChannel,
+
     interpolation_queue: RingBuffer(WorldState, 8) = .{},
     latest_world_state: WorldState = .{},
 
     /// Must be as long as server<->client round-trip latency.
-    command_queue: RingBuffer(CommandFrame, 128),
+    command_queue: RingBuffer(CommandFrame, 128) = .{},
     prediction: std.ArrayListUnmanaged(WorldState) = .{},
     prediction_dirty: bool = true,
 
@@ -885,6 +892,8 @@ pub const App = struct {
     // How many seconds (<1 tick) that still need to be simulated.
     tick_remainder: f32 = 0.0,
 
+    client: ?Client = null,
+
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
@@ -1041,7 +1050,7 @@ pub fn main() !void {
                 port = std.fmt.parseInt(u16, ip_and_port[colon + 1 ..], 10) catch unreachable;
             }
 
-            addr = std.net.Address.resolveIp(ip, port);
+            addr = std.net.Address.resolveIp(ip, port) catch unreachable;
         }
 
         if (std.mem.eql(u8, arg, "--dedicated")) {
@@ -1058,17 +1067,17 @@ pub fn main() !void {
 
             var server = Server.init(allocator, &map_bmodel);
 
-            var remainder: f32 = 0.0;
+            var remainder: f64 = 0.0;
 
             var previous_time: f64 = c.glfwGetTime();
             while (true) {
                 const time = c.glfwGetTime();
-                const delta: f32 = @floatCast(time - previous_time);
+                const delta: f64 = @floatCast(time - previous_time);
                 previous_time = time;
 
                 remainder += delta;
-                while (remainder > server.tick_length) {
-                    remainder -= server.tick_length;
+                while (remainder > @as(f64, @floatCast(server.tick_length))) {
+                    remainder -= @as(f64, @floatCast(server.tick_length));
                     server.tick();
                 }
             }
@@ -1153,6 +1162,17 @@ pub fn main() !void {
 
     var trace_origin = linalg.Vec3.zero();
     var trace_direction = linalg.Vec3.zero();
+
+    if (addr) |addr_definite| {
+        const stream = try std.net.tcpConnectToAddress(addr_definite);
+
+        const flags = try std.os.fcntl(stream.handle, 3, 0);
+        _ = try std.os.fcntl(stream.handle, 4, flags | std.os.SOCK.NONBLOCK);
+
+        app.client = Client{
+            .channel = NetChannel{ .tcp_stream = stream },
+        };
+    }
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
