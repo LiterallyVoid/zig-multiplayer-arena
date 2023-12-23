@@ -154,12 +154,15 @@ pub const EventTranslator = struct {
 };
 
 pub const CommandFrame = struct {
+    random: u8 = 0,
     movement: [3]f32 = .{ 0.0, 0.0, 0.0 },
     look: [2]f32 = .{ 0.0, 0.0 },
     jump_time: ?f32 = null,
 
     pub fn compose(a: CommandFrame, b: CommandFrame, ratio: f32) CommandFrame {
         return .{
+            .random = a.random,
+
             .movement = .{
                 a.movement[0] * (1.0 - ratio) + b.movement[0] * ratio,
                 a.movement[1] * (1.0 - ratio) + b.movement[1] * ratio,
@@ -250,7 +253,8 @@ pub const InputBundler = struct {
     }
 
     pub fn commit(self: *InputBundler) CommandFrame {
-        const frame = self.latest_command_frame;
+        var frame = self.latest_command_frame;
+        frame.random = std.crypto.random.int(u8);
 
         self.latest_command_frame = .{};
         self.latest_command_frame_fraction = 0.0;
@@ -290,6 +294,7 @@ pub const NetChannel = struct {
             const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
 
             if (self.buffer_length < packet_length + 2) {
+                std.log.info("no packet in {}", .{self.buffer_length});
                 return null;
             }
 
@@ -311,7 +316,7 @@ pub const NetChannel = struct {
 
         const encoded = stream.getWritten();
 
-        std.log.info("sending JSON packet: {s}", .{encoded});
+        // std.log.info("sending JSON packet: {s}", .{encoded});
 
         self.send(encoded);
     }
@@ -320,7 +325,7 @@ pub const NetChannel = struct {
         var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
         const bytes = self.poll(&buffer) orelse return null;
 
-        std.log.info("received JSON packet: {s}", .{bytes});
+        // std.log.info("received JSON packet: {s}", .{bytes});
 
         return std.json.parseFromSliceLeaky(T, allocator, bytes, .{}) catch unreachable;
     }
@@ -351,7 +356,7 @@ pub fn RingBuffer(comptime T: type, comptime limit: u32) type {
             return self.items[(self.insert_head + limit - self.length) % limit];
         }
 
-        pub fn peek(self: *Self, index: u32) ?T {
+        pub fn peek(self: *const Self, index: u32) ?T {
             if (index < 0 or index >= self.length) return null;
             const wrapped_index =
                 (self.insert_head + limit - self.length + index + 1) %
@@ -359,6 +364,35 @@ pub fn RingBuffer(comptime T: type, comptime limit: u32) type {
             return self.items[wrapped_index];
         }
     };
+}
+
+test RingBuffer {
+    var i = RingBuffer(u8, 2){};
+    try std.testing.expectEqual(@as(?u8, null), i.pop());
+    try std.testing.expectEqual(@as(?u8, null), i.peek(0));
+
+    i.push(1);
+    try std.testing.expectEqual(@as(u32, 1), i.length);
+    try std.testing.expectEqual(@as(?u8, 1), i.peek(0));
+    try std.testing.expectEqual(@as(?u8, 1), i.pop());
+    try std.testing.expectEqual(@as(?u8, null), i.pop());
+    try std.testing.expectEqual(@as(?u8, null), i.peek(0));
+
+    i.push(2);
+    i.push(3);
+
+    try std.testing.expectEqual(@as(?u8, 2), i.peek(0));
+    try std.testing.expectEqual(@as(?u8, 3), i.peek(1));
+    try std.testing.expectEqual(@as(?u8, 2), i.pop());
+    try std.testing.expectEqual(@as(?u8, 3), i.pop());
+    try std.testing.expectEqual(@as(?u8, null), i.peek(0));
+
+    i.push(4);
+    i.push(5);
+    i.push(6);
+    try std.testing.expectEqual(@as(?u8, 5), i.peek(0));
+    try std.testing.expectEqual(@as(?u8, 6), i.peek(1));
+    try std.testing.expectEqual(@as(?u8, null), i.peek(2));
 }
 
 pub const Entity = union(enum) {
@@ -390,6 +424,8 @@ pub const WorldState = struct {
             slot.id.revision +%= 1;
 
             if (slot.id.revision == 0) std.log.warn("entity slot {} reused", .{i});
+
+            slot.controller = null;
 
             return slot;
         }
@@ -430,10 +466,11 @@ pub const ServerMessage = union(enum) {
         tick_length: f32,
     },
     entity_refresh: struct {
-        slot: u32,
+        slot: u16,
         data: EntitySlot,
     },
     tick_report: struct {
+        last_frame: u8,
         command_queue_length: u32,
         time_since_receiving_command: f32,
     },
@@ -449,7 +486,7 @@ pub const Server = struct {
 
     latest_client_id: u32 = 0,
 
-    tick_length: f32 = 1.0 / 20.0,
+    tick_length: f32 = 1.0 / 24.0,
 
     pub fn init(allocator: std.mem.Allocator, map: *collision.BrushModel) Server {
         return Server{
@@ -463,7 +500,8 @@ pub const Server = struct {
         self.latest_client_id += 1;
 
         const entity = self.world.spawn().?;
-        entity.entity = .{ .player = .{ .map_bmodel = self.map } };
+        entity.entity = .{ .player = .{} };
+        entity.controller = id;
 
         try self.clients.append(self.allocator, .{
             .id = id,
@@ -483,6 +521,7 @@ pub const Server = struct {
         _ = self;
         switch (message) {
             .tick => |tick_info| {
+                std.log.info("got tick {}", .{tick_info.command_frame.random});
                 client.command_queue.push(tick_info.command_frame);
             },
         }
@@ -497,6 +536,7 @@ pub const Server = struct {
         for (self.clients.items) |*client| {
             const cqlen = client.command_queue.length;
             const command_frame = client.command_queue.pop() orelse CommandFrame{};
+            std.log.info("cqlen: {}, simulating {}", .{ cqlen, command_frame.random });
             const entity = self.world.get(client.entity) orelse {
                 std.log.warn("client has no entity?", .{});
 
@@ -504,10 +544,23 @@ pub const Server = struct {
             };
 
             switch (entity.entity) {
-                .player => |*player| player.update(self.tick_length, command_frame),
+                .player => |*player| player.update(self.map, self.tick_length, command_frame),
+            }
+
+            for (&client.world_state_pending.entities, self.world.entities) |*old, new| {
+                if (std.meta.eql(old.*, new)) continue;
+
+                old.* = new;
+                client.channel.sendTyped(ServerMessage, .{
+                    .entity_refresh = .{
+                        .slot = new.id.index,
+                        .data = new,
+                    },
+                });
             }
 
             client.channel.sendTyped(ServerMessage, .{ .tick_report = .{
+                .last_frame = command_frame.random,
                 .command_queue_length = cqlen,
                 .time_since_receiving_command = 0.0,
             } });
@@ -524,8 +577,14 @@ pub const ClientMessage = union(enum) {
 
 pub const Client = struct {
     pub const CommandQueueHealthFrame = struct {
+        last_frame: u8,
         queued_ticks: f32,
+
+        slow: bool,
+        fast: bool,
     };
+
+    map: *collision.BrushModel,
 
     /// Must be synced to server's ID of self
     id: u32 = 0,
@@ -537,16 +596,20 @@ pub const Client = struct {
 
     /// Must be as long as server<->client round-trip latency.
     command_queue: RingBuffer(CommandFrame, 128) = .{},
+
     prediction: std.ArrayListUnmanaged(WorldState) = .{},
     /// The partial prediction frame that should be displayed.
     prediction_partial: WorldState = .{},
     prediction_dirty: bool = true,
 
     server_command_queue_health_debug: RingBuffer(CommandQueueHealthFrame, 60) = .{},
+    time_since_health: f32 = 0.0,
 
     input_bundler: InputBundler = .{},
 
-    tick_length: f32 = 1.0 / 20.0,
+    timescale: f32 = 1.0,
+
+    tick_length: f32 = 1.0 / 24.0,
     tick_remainder: f32 = 0.0,
 
     pub fn update(self: *Client, allocator: std.mem.Allocator, app: *const App, delta: f32) void {
@@ -559,11 +622,6 @@ pub const Client = struct {
             const command_frame = self.input_bundler.commit();
 
             self.tick(command_frame);
-            self.channel.sendTyped(ClientMessage, .{
-                .tick = .{
-                    .command_frame = command_frame,
-                },
-            });
         }
 
         while (self.channel.pollTyped(ServerMessage, allocator)) |message| {
@@ -572,15 +630,25 @@ pub const Client = struct {
 
         // Use app.allocator, because the predictions list must last across frames.
         self.predict(app.allocator, self.input_bundler.partial(), self.tick_remainder);
+
+        self.time_since_health += delta;
     }
 
     pub fn tick(self: *Client, frame: CommandFrame) void {
+        std.log.info("sending frame {}", .{frame.random});
         self.command_queue.push(frame);
+        self.channel.sendTyped(ClientMessage, .{
+            .tick = .{
+                .command_frame = frame,
+            },
+        });
     }
 
     pub fn predict(self: *Client, allocator: std.mem.Allocator, partial_frame: CommandFrame, partial_remainder: f32) void {
         if (self.prediction_dirty) {
             self.prediction.clearRetainingCapacity();
+
+            self.prediction_dirty = false;
         }
 
         var accumulator = self.prediction.getLastOrNull() orelse
@@ -604,7 +672,7 @@ pub const Client = struct {
             for (&accumulator.entities) |*entity| {
                 if (!entity.alive) continue;
                 switch (entity.entity) {
-                    .player => |*player| player.update(self.tick_length, command_frame),
+                    .player => |*player| player.update(self.map, self.tick_length, command_frame),
                 }
             }
 
@@ -614,7 +682,7 @@ pub const Client = struct {
         for (&accumulator.entities) |*entity| {
             if (!entity.alive) continue;
             switch (entity.entity) {
-                .player => |*player| player.update(partial_remainder, partial_frame),
+                .player => |*player| player.update(self.map, partial_remainder, partial_frame),
             }
         }
 
@@ -631,23 +699,58 @@ pub const Client = struct {
                 self.latest_world_state.entities[refresh.slot] = refresh.data;
             },
             .tick_report => |report| {
-                self.server_command_queue_health_debug.push(.{
-                    .queued_ticks = @as(f32, @floatFromInt(report.command_queue_length)) -
-                        report.time_since_receiving_command / self.tick_length,
-                });
+                self.timescale = 1.0;
+                const queued_ticks = @as(f32, @floatFromInt(report.command_queue_length)) + report.time_since_receiving_command / self.tick_length;
 
-                while (self.command_queue.length > report.command_queue_length) {
+                var slow = false;
+                var fast = false;
+
+                if (queued_ticks < 0.5) {
+                    fast = true;
+                    self.timescale = 1.05;
+                } else if (queued_ticks > 1.5) {
+                    slow = true;
+                    self.timescale = 0.95;
+                }
+
+                self.server_command_queue_health_debug.push(.{
+                    .last_frame = report.last_frame,
+                    .queued_ticks = queued_ticks,
+                    .slow = slow,
+                    .fast = fast,
+                });
+                self.time_since_health = 0;
+
+                var found_current = false;
+                for (0..self.command_queue.length) |index| {
+                    const item = self.command_queue.peek(@intCast(index)) orelse continue;
+                    if (item.random != report.last_frame) continue;
+
+                    found_current = true;
+
+                    for (0..index) |_| {
+                        _ = self.command_queue.pop();
+                    }
+
                     _ = self.command_queue.pop();
+
+                    break;
+                }
+
+                if (!found_current) {
+                    std.log.err("error: command queue desync?", .{});
+                    std.log.err("error: server just simulated {}", .{report.last_frame});
+                    var my_frames: [512]u8 = undefined;
+                    for (0..self.command_queue.length) |index| {
+                        const item = self.command_queue.peek(@intCast(index)) orelse continue;
+                        my_frames[index] = item.random;
+                    }
+                    std.log.err("my frames: {any}", .{my_frames[0..self.command_queue.length]});
                 }
 
                 self.prediction_dirty = true;
             },
         }
-    }
-
-    pub fn send(self: *Client, message: ClientMessage) void {
-        _ = self;
-        std.log.info("client send {}", message);
     }
 };
 
@@ -673,13 +776,11 @@ pub const Walkcam = struct {
     velocity: linalg.Vec3 = linalg.Vec3.zero(),
     angle: [2]f32 = .{ 0.0, 0.0 },
 
-    map_bmodel: *collision.BrushModel,
-
     state: State = .fall,
 
     step_smooth: f32 = 0.0,
 
-    pub fn update(self: *Walkcam, delta: f32, command_frame: CommandFrame) void {
+    pub fn update(self: *Walkcam, map: *collision.BrushModel, delta: f32, command_frame: CommandFrame) void {
         self.angle[0] += command_frame.look[0];
         self.angle[1] += command_frame.look[1];
 
@@ -707,7 +808,7 @@ pub const Walkcam = struct {
         self.step_smooth *= std.math.exp(-delta * 18.0);
 
         self.forces(command_frame, delta * 0.5);
-        self.physics(delta);
+        self.physics(map, delta);
         self.forces(command_frame, delta * 0.5);
     }
 
@@ -737,23 +838,23 @@ pub const Walkcam = struct {
         }
     }
 
-    pub fn physics(self: *Walkcam, delta: f32) void {
+    pub fn physics(self: *Walkcam, map: *const collision.BrushModel, delta: f32) void {
         const options = MoveOptions{};
         switch (self.state) {
             .fly => {
-                _ = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                _ = flyMove(map, options, &self.origin, &self.velocity, delta);
             },
             .walk => {
-                const move = walkMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                const move = walkMove(map, options, &self.origin, &self.velocity, delta);
                 if (move) |walk_info| {
                     self.step_smooth += walk_info.step_jump;
                 } else {
                     self.state = .fall;
-                    _ = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                    _ = flyMove(map, options, &self.origin, &self.velocity, delta);
                 }
             },
             .fall => {
-                const move = flyMove(self.map_bmodel, options, &self.origin, &self.velocity, delta);
+                const move = flyMove(map, options, &self.origin, &self.velocity, delta);
                 if (move.on_ground) {
                     self.state = .walk;
                 }
@@ -761,7 +862,7 @@ pub const Walkcam = struct {
         }
     }
 
-    pub fn flyMove(map: *collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
+    pub fn flyMove(map: *const collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
         var on_ground = false;
         const half_extents = options.half_extents;
 
@@ -816,7 +917,7 @@ pub const Walkcam = struct {
         };
     }
 
-    pub fn walkMove(map: *collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
+    pub fn walkMove(map: *const collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
         step_jump: f32,
     } {
 
@@ -942,7 +1043,7 @@ pub const App = struct {
 
     font: Font,
 
-    tick_length: f32 = 1.0 / 20.0,
+    tick_length: f32 = 1.0 / 24.0,
 
     // How many seconds (<1 tick) that still need to be simulated.
     tick_remainder: f32 = 0.0,
@@ -968,15 +1069,17 @@ pub const App = struct {
         self.tick_remainder += delta * self.timescale;
         if (self.tick_remainder > self.tick_length) {
             const command_frame = self.input_bundler.commit();
+            _ = command_frame;
 
             self.tick_remainder -= self.tick_length;
-            self.cam.update(self.tick_length, command_frame);
+            // self.cam.update(self.tick_length, command_frame);
         }
 
         const command_frame = self.input_bundler.partial();
+        _ = command_frame;
 
-        self.cam_partial = self.cam;
-        self.cam_partial.update(self.tick_remainder, command_frame);
+        // self.cam_partial = self.cam;
+        // self.cam_partial.update(self.tick_remainder, command_frame);
 
         if (self.client) |*client| {
             client.update(self.allocator, self, delta);
@@ -1005,6 +1108,9 @@ pub const App = struct {
             else => {},
         }
 
+        if (self.client) |*client| {
+            if (client.input_bundler.handleEvent(self, event)) return true;
+        }
         if (self.input_bundler.handleEvent(self, event)) return true;
 
         return false;
@@ -1111,7 +1217,7 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, arg, "--dedicated")) {
-            std.log.info("Doing a busy loop", .{});
+            std.log.err("Doing a busy loop", .{});
 
             _ = c.glfwInit();
             defer c.glfwTerminate();
@@ -1222,9 +1328,7 @@ pub fn main() !void {
     do.resources.shader_ui_color = try Shader.load(allocator, "zig-out/assets/debug/shader-ui-color");
     defer do.resources.shader_ui_color.deinit();
 
-    app.cam = Walkcam{
-        .map_bmodel = &map_bmodel,
-    };
+    app.cam = Walkcam{};
 
     app.font = try Font.load(
         allocator,
@@ -1245,6 +1349,7 @@ pub fn main() !void {
         setNonblock(stream.handle);
 
         app.client = Client{
+            .map = &map_bmodel,
             .channel = NetChannel{ .tcp_stream = stream },
         };
     }
@@ -1292,7 +1397,15 @@ pub fn main() !void {
         });
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(linalg.Mat4.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), std.math.pi * 0.5));
 
-        const matrix_camera = app.cam_partial.cameraMatrix();
+        var matrix_camera = app.cam_partial.cameraMatrix();
+        if (app.client) |client| {
+            for (client.prediction_partial.entities) |entity| {
+                if (!entity.alive) continue;
+                if (entity.entity == .player) {
+                    matrix_camera = entity.entity.player.cameraMatrix();
+                }
+            }
+        }
 
         matrix_projectionview = matrix_projectionview.multiply(matrix_camera.inverse());
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(matrix_camera.inverse());
@@ -1391,16 +1504,43 @@ pub fn main() !void {
         };
 
         do.text("Hello world", .{}, size[0] * 0.5, size[1] * 0.75, 0.5, 120.0, &app.font);
-        do.text("pos: {d}", .{app.cam_partial.origin}, 20.0, 20.0, 0.0, 16.0, &app.font);
-        do.text("vel: {d:.3} / {d}", .{ app.cam_partial.velocity.length(), app.cam_partial.velocity }, 20.0, 36.0, 0.0, 16.0, &app.font);
-        do.text("tick pos: {d}", .{app.cam.origin}, 20.0, 52.0, 0.0, 16.0, &app.font);
-        do.text("tick vel: {d}", .{app.cam.velocity}, 20.0, 68.0, 0.0, 16.0, &app.font);
-        do.text("tick distance: {d}", .{app.cam.origin.sub(app.cam_partial.origin).length()}, 20.0, 84.0, 0.0, 16.0, &app.font);
-        do.rect(20.0, 100.0, 300.0, 20.0, .{ 0, 0, 0, 160 });
-        do.rect(20.0, 100.0, 300.0 * (app.tick_remainder / app.tick_length), 20.0, .{ 255, 0, 0, 255 });
-        // do.text("Command queue:", .{}, size[0] - 400.0, 30.0, 0.0, 30.0, &app.font);
-        // do.rect(size[0] - 400.0, 50.0, 300.0, 20.0, .{ 0, 0, 0, 120 });
+        // do.text("pos: {d}", .{app.cam_partial.origin}, 20.0, 20.0, 0.0, 16.0, &app.font);
+        // do.text("vel: {d:.3} / {d}", .{ app.cam_partial.velocity.length(), app.cam_partial.velocity }, 20.0, 36.0, 0.0, 16.0, &app.font);
+        // do.text("tick pos: {d}", .{app.cam.origin}, 20.0, 52.0, 0.0, 16.0, &app.font);
+        // do.text("tick vel: {d}", .{app.cam.velocity}, 20.0, 68.0, 0.0, 16.0, &app.font);
+        // do.text("tick distance: {d}", .{app.cam.origin.sub(app.cam_partial.origin).length()}, 20.0, 84.0, 0.0, 16.0, &app.font);
+        // do.rect(20.0, 100.0, 300.0, 20.0, .{ 0, 0, 0, 160 });
+        // do.rect(20.0, 100.0, 300.0 * (app.tick_remainder / app.tick_length), 20.0, .{ 255, 0, 0, 255 });
 
+        if (app.client) |client| {
+            do.text("command queue", .{}, 20.0, 200.0, 0.0, 16.0, &app.font);
+            do.rect(20.0, 216.0, 600.0, 50.0, .{ 0, 0, 0, 160 });
+
+            const health = client.server_command_queue_health_debug;
+
+            for (0..20) |i| {
+                const index = health.length -% 20 +% @as(u32, @intCast(i));
+                const x = @as(f32, @floatFromInt(i)) * 20.0 + 21.0 -
+                    20.0 * client.time_since_health / client.tick_length;
+                if (health.peek(index)) |frame| {
+                    if (frame.queued_ticks > 0.1) {
+                        do.rect(x, 217.0, 18.0, 20.0 * frame.queued_ticks - 2.0, .{ 0, 255, 0, 255 });
+                    } else {
+                        do.rect(x, 217.0, 18.0, 18.0, .{ 255, 0, 0, 255 });
+                    }
+
+                    do.text("{}", .{frame.last_frame}, x + 10.0, 226.0, 0.5, 12.0, &app.font);
+                }
+            }
+
+            for (0..client.command_queue.length) |i| {
+                const item = client.command_queue.peek(@intCast(i)) orelse continue;
+                const x = @as(f32, @floatFromInt(i)) * 20.0 + 426.0 -
+                    20.0 * (client.time_since_health / client.tick_length);
+                do.rect(x, 217.0, 18.0, 18.0, .{ 0, 160, 0, 160 });
+                do.text("{}", .{item.random}, x + 10.0, 226.0, 0.5, 12.0, &app.font);
+            }
+        }
         // for (0..10) |i| {
         //     do.rect(size[0] - 400.0 + @as(f32, @floatFromInt(i)) * 30.0, 50.0, 20.0, 20.0, .{ 0, 255, 0, 255 });
         // }
