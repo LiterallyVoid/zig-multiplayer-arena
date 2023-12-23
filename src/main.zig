@@ -278,9 +278,9 @@ pub const NetChannel = struct {
     }
 
     pub fn poll(self: *NetChannel, buffer: *[MAX_MESSAGE_LENGTH]u8) ?[]u8 {
-        if (self.buffer_length < self.buffer.len) {
+        if (self.buffer_length < self.buffer.len) read_stream: {
             const amt = self.tcp_stream.read(self.buffer[self.buffer_length..]) catch |err| switch (err) {
-                error.WouldBlock => return null,
+                error.WouldBlock => break :read_stream,
                 else => {
                     std.log.err("got error while reading from socket: {}", .{err});
 
