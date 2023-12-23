@@ -553,7 +553,9 @@ pub const Client = struct {
         self.input_bundler.update(app, delta);
 
         self.tick_remainder += delta;
-        if (self.tick_remainder > delta) {
+        if (self.tick_remainder > self.tick_length) {
+            self.tick_remainder -= self.tick_length;
+
             const command_frame = self.input_bundler.commit();
 
             self.tick(command_frame);
