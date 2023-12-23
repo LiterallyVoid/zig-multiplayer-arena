@@ -151,37 +151,84 @@ pub const EventTranslator = struct {
 pub const CommandFrame = struct {
     movement: [3]f32 = .{ 0.0, 0.0, 0.0 },
     look: [2]f32 = .{ 0.0, 0.0 },
+    jump_time: ?f32 = null,
+
+    pub fn compose(a: CommandFrame, b: CommandFrame, ratio: f32) CommandFrame {
+        return .{
+            .movement = .{
+                a.movement[0] * (1.0 - ratio) + b.movement[0] * ratio,
+                a.movement[1] * (1.0 - ratio) + b.movement[1] * ratio,
+                a.movement[2] * (1.0 - ratio) + b.movement[2] * ratio,
+            },
+            .look = .{
+                a.look[0] + b.look[0],
+                a.look[1] + b.look[1],
+            },
+            .jump_time = if (a.jump_time) |a_jump|
+                a_jump * (1.0 - ratio)
+            else if (b.jump_time) |b_jump|
+                (1.0 - ratio) + b_jump * ratio
+            else
+                null,
+        };
+    }
 };
 
 pub const InputBundler = struct {
     latest_command_frame: CommandFrame,
-    next_command_frame: CommandFrame,
+    latest_command_frame_fraction: f32 = 0.0,
 
     pub fn init() InputBundler {
         return .{
             .latest_command_frame = .{},
-            .next_command_frame = .{},
         };
     }
 
-    pub fn handleEvent(self: *InputBundler, event: Event, app: *const App) bool {
-        // TODO: These should probably integrate angle now
-        self.next_command_frame.movement[0] =
-            app.actions[@intFromEnum(ActionId.forward)] -
-            app.actions[@intFromEnum(ActionId.back)];
-        self.next_command_frame.movement[1] =
-            app.actions[@intFromEnum(ActionId.left)] -
-            app.actions[@intFromEnum(ActionId.right)];
-        self.next_command_frame.movement[2] =
-            app.actions[@intFromEnum(ActionId.jump)] -
-            app.actions[@intFromEnum(ActionId.crouch)];
+    pub fn integrate(self: *InputBundler, frame: CommandFrame, length: f32) void {
+        var ratio: f32 = 0.0;
+        if (length > 0.0) {
+            ratio = length / (length + self.latest_command_frame_fraction);
+        }
 
+        self.latest_command_frame = self.latest_command_frame.compose(frame, ratio);
+        self.latest_command_frame_fraction += length;
+    }
+
+    pub fn update(self: *InputBundler, app: *const App, slice_length: f32) void {
+        // TODO: These should probably integrate angle now
+        const slice_frame = .{
+            .movement = .{
+                app.actions[@intFromEnum(ActionId.forward)] -
+                    app.actions[@intFromEnum(ActionId.back)],
+
+                app.actions[@intFromEnum(ActionId.left)] -
+                    app.actions[@intFromEnum(ActionId.right)],
+
+                app.actions[@intFromEnum(ActionId.jump)] -
+                    app.actions[@intFromEnum(ActionId.crouch)],
+            },
+            .jump_time = if (app.actions[@intFromEnum(ActionId.jump)] > 0.5)
+                @as(f32, 0.0)
+            else
+                null,
+        };
+
+        self.integrate(slice_frame, slice_length);
+    }
+
+    pub fn handleEvent(self: *InputBundler, app: *const App, event: Event) bool {
+        _ = app;
         switch (event) {
             .mouse_motion => |motion| {
-                self.latest_command_frame.look[0] += motion.relative[0] * 0.003;
-                self.latest_command_frame.look[1] += motion.relative[1] * 0.003;
-                self.next_command_frame.look[0] += motion.relative[0] * 0.003;
-                self.next_command_frame.look[1] += motion.relative[1] * 0.003;
+                const frame = .{
+                    .look = .{
+                        motion.relative[0] * 0.003,
+                        motion.relative[1] * 0.003,
+                    },
+                };
+
+                self.integrate(frame, 0.0);
+
                 return true;
             },
             .action => |action| switch (action.id) {
@@ -206,10 +253,8 @@ pub const InputBundler = struct {
     pub fn commit(self: *InputBundler) CommandFrame {
         const frame = self.latest_command_frame;
 
-        self.latest_command_frame.look = .{ 0.0, 0.0 };
-        self.next_command_frame.look = .{ 0.0, 0.0 };
-
-        self.latest_command_frame = self.next_command_frame;
+        self.latest_command_frame = .{};
+        self.latest_command_frame_fraction = 0.0;
 
         return frame;
     }
@@ -268,11 +313,11 @@ pub const Walkcam = struct {
         const options = MoveOptions{};
         _ = options;
 
+        self.step_smooth *= std.math.exp(-delta * 18.0);
+
         self.forces(command_frame, delta * 0.5);
         self.physics(delta);
         self.forces(command_frame, delta * 0.5);
-
-        self.step_smooth *= std.math.exp(-delta * 18.0);
     }
 
     pub fn forces(self: *Walkcam, command_frame: CommandFrame, delta: f32) void {
@@ -289,7 +334,10 @@ pub const Walkcam = struct {
             .fly => self.flyForces(delta, move, 100.0),
             .walk => {
                 self.walkForces(delta, move, 10.0, 200.0, 100.0);
-                if (command_frame.movement[2] > 0.5) {
+
+                // TODO: subtick jump
+                if (command_frame.jump_time) |jump_time| {
+                    _ = jump_time;
                     self.state = .fall;
                     self.velocity.data[2] = 10.0;
                 }
@@ -503,7 +551,7 @@ pub const App = struct {
 
     font: Font,
 
-    tick_length: f32 = 1.0 / 8.0,
+    tick_length: f32 = 1.0 / 20.0,
 
     // How many seconds (<1 tick) that still need to be simulated.
     tick_remainder: f32 = 0.0,
@@ -524,6 +572,8 @@ pub const App = struct {
     }
 
     pub fn update(self: *App, delta: f32) void {
+        self.input_bundler.update(self, delta * self.timescale);
+
         self.tick_remainder += delta * self.timescale;
         if (self.tick_remainder > self.tick_length) {
             const command_frame = self.input_bundler.commit();
@@ -560,7 +610,7 @@ pub const App = struct {
             else => {},
         }
 
-        if (self.input_bundler.handleEvent(event, self)) return true;
+        if (self.input_bundler.handleEvent(self, event)) return true;
 
         return false;
     }
