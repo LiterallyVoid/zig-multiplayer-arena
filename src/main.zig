@@ -1544,38 +1544,35 @@ pub fn main() !void {
         if (app.actions[@intFromEnum(ActionId.debug4)] > 0.5) {
             if (app.client) |client| {
                 do.text("command queue", .{}, 20.0, 200.0, 0.0, 16.0, &app.font);
-                do.rect(20.0, 216.0, 600.0, 50.0, .{ 0, 0, 0, 160 });
+                do.rect(20.0, 216.0, 320.0, 60.0, .{ 0, 0, 0, 160 });
 
                 const health = client.server_command_queue_health_debug;
 
                 for (0..20) |i| {
                     const index = health.length -% 20 +% @as(u32, @intCast(i));
-                    const x = @as(f32, @floatFromInt(i)) * 20.0 + 21.0 -
-                        20.0 * client.time_since_health / client.tick_length;
+                    const x = @as(f32, @floatFromInt(i)) * 10.0 + 21.0;
                     if (health.peek(index)) |frame| {
                         if (frame.queued_ticks > 0.1) {
-                            do.rect(x, 217.0, 18.0, 20.0 * frame.queued_ticks - 2.0, .{ 0, 255, 0, 255 });
+                            const h = 10.0 * frame.queued_ticks - 2.0;
+                            do.rect(x, 217.0 + 58.0 - h, 8.0, h, .{ 0, 255, 0, 255 });
                         } else {
-                            do.rect(x, 217.0, 18.0, 18.0, .{ 255, 0, 0, 255 });
+                            do.rect(x, 267.0, 8.0, 8.0, .{ 255, 0, 0, 255 });
                         }
 
                         if (frame.slow) {
-                            do.rect(x, 216.0, 18.0, 150.0, .{ 96, 96, 0, 128 });
+                            do.rect(x - 1.0, 216.0, 10.0, 50.0, .{ 96, 96, 0, 128 });
                         }
                         if (frame.fast) {
-                            do.rect(x, 216.0, 18.0, 150.0, .{ 0, 38, 96, 128 });
+                            do.rect(x - 1.0, 216.0, 10.0, 50.0, .{ 0, 38, 96, 128 });
                         }
-
-                        do.text("{}", .{frame.last_frame}, x + 10.0, 226.0, 0.5, 12.0, &app.font);
                     }
                 }
 
                 for (0..client.command_queue.length) |i| {
                     const item = client.command_queue.peek(@intCast(i)) orelse continue;
-                    const x = @as(f32, @floatFromInt(i)) * 20.0 + 426.0 -
-                        20.0 * (client.time_since_health / client.tick_length);
-                    do.rect(x, 217.0, 18.0, 18.0, .{ 0, 160, 0, 160 });
-                    do.text("{}", .{item.random}, x + 10.0, 226.0, 0.5, 12.0, &app.font);
+                    _ = item;
+                    const x = @as(f32, @floatFromInt(i)) * 10.0 + 222.0;
+                    do.rect(x, 267.0, 8.0, 8.0, .{ 0, 90, 255, 255 });
                 }
             }
         }
