@@ -916,7 +916,7 @@ pub fn main() !void {
 
         do.text("Hello world", .{}, size[0] * 0.5, size[1] * 0.75, 0.5, 120.0, &app.font);
         do.text("pos: {d}", .{app.cam_partial.origin}, 20.0, 20.0, 0.0, 16.0, &app.font);
-        do.text("vel: {d}", .{app.cam_partial.velocity}, 20.0, 36.0, 0.0, 16.0, &app.font);
+        do.text("vel: {d:.3} / {d}", .{ app.cam_partial.velocity.length(), app.cam_partial.velocity }, 20.0, 36.0, 0.0, 16.0, &app.font);
         do.text("tick pos: {d}", .{app.cam.origin}, 20.0, 52.0, 0.0, 16.0, &app.font);
         do.text("tick vel: {d}", .{app.cam.velocity}, 20.0, 68.0, 0.0, 16.0, &app.font);
         do.text("tick distance: {d}", .{app.cam.origin.sub(app.cam_partial.origin).length()}, 20.0, 84.0, 0.0, 16.0, &app.font);
