@@ -260,6 +260,193 @@ pub const InputBundler = struct {
     }
 };
 
+pub fn RingBuffer(comptime T: type, comptime limit: usize) type {
+    return struct {
+        const Self = @This();
+
+        items: [limit]T,
+
+        length: u32,
+        insert_head: u32,
+
+        pub fn push(self: *Self, item: T) void {
+            self.insert_head = (self.insert_head + 1) % limit;
+            self.items[self.insert_head] = item;
+
+            if (self.length < limit) {
+                self.length += 1;
+            }
+        }
+
+        pub fn pop(self: *Self) ?T {
+            if (self.length == 0) return null;
+
+            self.length -= 1;
+            return self.items[(self.insert_head + limit - self.length) % limit];
+        }
+
+        pub fn peek(self: *Self, index: u32) ?T {
+            if (index < 0 or index >= self.length) return null;
+            const wrapped_index =
+                (self.insert_head + limit - self.length + index + 1) %
+                limit;
+            return self.items[wrapped_index];
+        }
+    };
+}
+
+pub const Entity = union(enum) {
+    player: Walkcam,
+};
+
+pub const WORLD_MAX_ENTITIES = 128;
+pub const EntitySlot = struct {
+    alive: bool = false,
+    id: EntityId = .{ .index = 0, .revision = 0 },
+    entity: Entity = undefined,
+    controller: ?u32 = null,
+};
+
+pub const EntityId = struct {
+    index: u16,
+    revision: u16,
+};
+
+pub const WorldState = struct {
+    entities: [WORLD_MAX_ENTITIES]EntitySlot = .{.{}} ** WORLD_MAX_ENTITIES,
+
+    pub fn spawn(self: *WorldState) ?*EntitySlot {
+        for (&self.entities, 0..) |*slot, i| {
+            if (slot.alive) continue;
+
+            slot.alive = true;
+            slot.id.id = @intCast(i);
+            slot.id.revision +%= 1;
+
+            if (slot.revision == 0) std.log.warn("entity slot {} reused", .{i});
+
+            return slot;
+        }
+
+        return null;
+    }
+
+    pub fn get(self: *WorldState, id: EntityId) ?*EntitySlot {
+        const slot = &self.entities[id.index];
+        if (!slot.alive or
+            slot.id.index != id.index or
+            slot.id.revision != id.revision)
+        {
+            return null;
+        }
+
+        return slot;
+    }
+};
+
+/// A server's idea of what a client is.
+pub const ServerClient = struct {
+    entity: EntityId,
+    command_queue: RingBuffer(CommandFrame, 8),
+
+    /// The world state that's currently in flight to the client.
+    world_state_pending: WorldState,
+};
+
+/// All commands that the server can send to the client.
+pub const ServerMessage = union(enum) {
+    entity_refresh: struct {
+        slot: u32,
+        data: Entity,
+    },
+    tick_report: struct {
+        command_queue_length: u32,
+        time_since_receiving_command: f32,
+    },
+};
+
+pub const Server = struct {
+    map: *collision.BrushModel,
+
+    world: WorldState = .{},
+    clients: std.ArrayList(ServerClient),
+
+    tick_length: f32 = 1.0 / 20.0,
+
+    pub fn init(allocator: std.mem.Allocator, map: *collision.BrushModel) Server {
+        return Server{
+            .map = map,
+            .clients = std.ArrayList(ServerClient).init(allocator),
+        };
+    }
+
+    pub fn tick(self: *Server) void {
+        for (self.clients.items) |*client| {
+            const command_frame = client.command_queue.pop() orelse CommandFrame{};
+            const entity = self.world.get(client.entity) orelse {
+                std.log.warn("client has no entity?", .{});
+
+                continue;
+            };
+
+            switch (entity.entity) {
+                .player => |*player| player.update(self.tick_length, command_frame),
+            }
+        }
+    }
+};
+
+/// All commands that the client can send to the server.
+pub const ClientMessage = union(enum) {
+    tick: struct {
+        command_frame: CommandFrame,
+    },
+};
+
+pub const Client = struct {
+    pub const CommandQueueHealthFrame = struct {
+        queued_ticks: f32,
+    };
+
+    interpolation_queue: RingBuffer(WorldState, 8) = .{},
+    latest_world_state: WorldState = .{},
+
+    /// Must be as long as server<->client round-trip latency.
+    command_queue: RingBuffer(CommandFrame, 128),
+    prediction: std.ArrayListUnmanaged(WorldState) = .{},
+
+    server_command_queue_health_debug: RingBuffer(CommandQueueHealthFrame, 60) = .{},
+
+    tick_rate: f32 = 1.0 / 20.0,
+
+    pub fn tick(self: *Client, frame: CommandFrame) void {
+        self.command_queue.push(frame);
+    }
+
+    pub fn handleMessage(self: *Client, message: ServerMessage) void {
+        switch (message) {
+            .entity_refresh => |refresh| {
+                self.latest_world_state.entities[refresh.slot] = refresh.data;
+            },
+            .tick_report => |report| {
+                self.command_queue_health_debug.push(.{
+                    .queued_ticks = @as(f32, @floatFromInt(report.command_queue_length)) -
+                        report.time_since_receiving_command / self.tick_rate,
+                });
+
+                while (self.command_queue.length > report.command_queue_length) {
+                    _ = self.command_queue.pop();
+                }
+            },
+        }
+    }
+
+    pub fn send(self: *Client, message: ClientMessage) void {
+        _ = self;
+        std.log.info("client send {}", message);
+    }
+};
+
 pub const Walkcam = struct {
     pub const MoveOptions = struct {
         /// steepest angle = acos(floor_max_slope); 0.8 slope ~= 36 degrees
@@ -756,6 +943,8 @@ pub fn main() !void {
     do.resources.shader_ui_color = try Shader.load(allocator, "zig-out/assets/debug/shader-ui-color");
     defer do.resources.shader_ui_color.deinit();
 
+    var server = Server.init(allocator, &map_bmodel);
+
     app.cam = Walkcam{
         .map_bmodel = &map_bmodel,
     };
@@ -773,10 +962,18 @@ pub fn main() !void {
     var trace_origin = linalg.Vec3.zero();
     var trace_direction = linalg.Vec3.zero();
 
+    var server_tick_remainder: f32 = 0.0;
+
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
         var delta: f32 = @floatCast(time - previous_time);
         previous_time = time;
+
+        server_tick_remainder += delta;
+        while (server_tick_remainder > server.tick_length) {
+            server_tick_remainder -= server.tick_length;
+            server.tick();
+        }
 
         var width: c_int = 0;
         var height: c_int = 0;
