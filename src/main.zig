@@ -9,6 +9,11 @@ pub const collision = @import("./collision.zig");
 pub const debug_overlay = @import("./debug_overlay.zig");
 const do = &debug_overlay.singleton;
 
+pub fn setNonblock(socket: std.os.socket_t) void {
+    const flags = std.os.fcntl(socket, 3, 0) catch unreachable;
+    _ = std.os.fcntl(socket, 4, flags | std.os.SOCK.NONBLOCK) catch unreachable;
+}
+
 pub const ActionId = enum {
     attack1,
     attack2,
@@ -268,16 +273,21 @@ pub const NetChannel = struct {
     buffer_length: usize = 0,
 
     pub fn send(self: NetChannel, message: []const u8) void {
-        var length = std.mem.writeIntLittle(u16, @intCast(message.len));
-        self.tcp_stream.write(length);
-        self.tcp_stream.write(message);
+        var length_buf: [2]u8 = undefined;
+        std.mem.writeIntLittle(u16, &length_buf, @intCast(message.len));
+        self.tcp_stream.writeAll(&length_buf) catch unreachable;
+        self.tcp_stream.writeAll(message) catch unreachable;
     }
 
     pub fn poll(self: *NetChannel, buffer: *[MAX_MESSAGE_LENGTH]u8) ?[]u8 {
         if (self.buffer_length < self.buffer.len) {
-            const amt = self.tcp_stream.read(self.buffer[self.buffer_length..]) catch |err| {
-                std.log.err("got error while reading from socket: {}", .{err});
-                return null;
+            const amt = self.tcp_stream.read(self.buffer[self.buffer_length..]) catch |err| switch (err) {
+                error.WouldBlock => return null,
+                else => {
+                    std.log.err("got error while reading from socket: {}", .{err});
+
+                    return null;
+                },
             };
             self.buffer_length += amt;
         }
@@ -301,8 +311,10 @@ pub const NetChannel = struct {
 
     pub fn sendTyped(self: NetChannel, comptime T: type, message: T) void {
         var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
-        var writer = std.io.fixedBufferStream(&buffer);
-        const encoded = std.json.stringify(message, .{}, writer) catch unreachable;
+        var stream = std.io.fixedBufferStream(&buffer);
+        std.json.stringify(message, .{}, stream.writer()) catch unreachable;
+
+        const encoded = stream.getWritten();
 
         std.log.info("sending JSON packet: {s}", .{encoded});
 
@@ -379,10 +391,10 @@ pub const WorldState = struct {
             if (slot.alive) continue;
 
             slot.alive = true;
-            slot.id.id = @intCast(i);
+            slot.id.index = @intCast(i);
             slot.id.revision +%= 1;
 
-            if (slot.revision == 0) std.log.warn("entity slot {} reused", .{i});
+            if (slot.id.revision == 0) std.log.warn("entity slot {} reused", .{i});
 
             return slot;
         }
@@ -424,7 +436,7 @@ pub const ServerMessage = union(enum) {
     },
     entity_refresh: struct {
         slot: u32,
-        data: Entity,
+        data: EntitySlot,
     },
     tick_report: struct {
         command_queue_length: u32,
@@ -456,7 +468,7 @@ pub const Server = struct {
         self.latest_client_id += 1;
 
         const entity = self.world.spawn().?;
-        entity.entity = .{ .player = .{} };
+        entity.entity = .{ .player = .{ .map_bmodel = self.map } };
 
         try self.clients.append(self.allocator, .{
             .id = id,
@@ -465,6 +477,11 @@ pub const Server = struct {
             .command_queue = .{},
             .world_state_pending = .{},
         });
+
+        channel.sendTyped(ServerMessage, .{ .hello = .{
+            .your_id = id,
+            .tick_length = self.tick_length,
+        } });
     }
 
     fn handleMessage(self: *Server, client: *ServerClient, message: ClientMessage) void {
@@ -526,6 +543,13 @@ pub const Client = struct {
 
     tick_length: f32 = 1.0 / 20.0,
 
+    pub fn update(self: *Client, allocator: std.mem.Allocator, delta: f32) void {
+        _ = delta;
+        while (self.channel.pollTyped(ServerMessage, allocator)) |message| {
+            self.handleMessage(message);
+        }
+    }
+
     pub fn tick(self: *Client, frame: CommandFrame) void {
         self.command_queue.push(frame);
     }
@@ -576,9 +600,9 @@ pub const Client = struct {
                 self.latest_world_state.entities[refresh.slot] = refresh.data;
             },
             .tick_report => |report| {
-                self.command_queue_health_debug.push(.{
+                self.server_command_queue_health_debug.push(.{
                     .queued_ticks = @as(f32, @floatFromInt(report.command_queue_length)) -
-                        report.time_since_receiving_command / self.tick_rate,
+                        report.time_since_receiving_command / self.tick_length,
                 });
 
                 while (self.command_queue.length > report.command_queue_length) {
@@ -924,6 +948,10 @@ pub const App = struct {
 
         self.cam_partial = self.cam;
         self.cam_partial.update(self.tick_remainder, command_frame);
+
+        if (self.client) |*client| {
+            client.update(self.allocator, delta);
+        }
     }
 
     pub fn handleEvent(self: *App, event: Event) bool {
@@ -1067,6 +1095,12 @@ pub fn main() !void {
 
             var server = Server.init(allocator, &map_bmodel);
 
+            var tcp_server = std.net.StreamServer.init(.{
+                .reuse_address = true,
+            });
+            try tcp_server.listen(addr.?);
+            setNonblock(tcp_server.sockfd.?);
+
             var remainder: f64 = 0.0;
 
             var previous_time: f64 = c.glfwGetTime();
@@ -1080,6 +1114,19 @@ pub fn main() !void {
                     remainder -= @as(f64, @floatCast(server.tick_length));
                     server.tick();
                 }
+
+                const conn = tcp_server.accept() catch |err| switch (err) {
+                    error.WouldBlock => continue,
+                    else => {
+                        std.log.info("error accepting: {}", .{err});
+                        continue;
+                    },
+                };
+                setNonblock(conn.stream.handle);
+
+                try server.handleConnect(.{
+                    .tcp_stream = conn.stream,
+                });
             }
         }
     }
@@ -1166,8 +1213,7 @@ pub fn main() !void {
     if (addr) |addr_definite| {
         const stream = try std.net.tcpConnectToAddress(addr_definite);
 
-        const flags = try std.os.fcntl(stream.handle, 3, 0);
-        _ = try std.os.fcntl(stream.handle, 4, flags | std.os.SOCK.NONBLOCK);
+        setNonblock(stream.handle);
 
         app.client = Client{
             .channel = NetChannel{ .tcp_stream = stream },
