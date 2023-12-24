@@ -270,11 +270,21 @@ pub const NetChannel = struct {
     buffer: [MAX_MESSAGE_LENGTH]u8 = undefined,
     buffer_length: usize = 0,
 
-    pub fn send(self: NetChannel, message: []const u8) void {
+    tx: usize = 0,
+    rx: usize = 0,
+    errors: usize = 0,
+
+    pub fn send(self: *NetChannel, message: []const u8) void {
         var length_buf: [2]u8 = undefined;
         std.mem.writeIntLittle(u16, &length_buf, @intCast(message.len));
-        self.tcp_stream.writeAll(&length_buf) catch unreachable;
-        self.tcp_stream.writeAll(message) catch unreachable;
+        self.tcp_stream.writeAll(&length_buf) catch {};
+        self.tcp_stream.writeAll(message) catch |e| {
+            std.log.err("error while writing: {}", .{e});
+            self.errors += 1;
+            return;
+        };
+
+        self.tx += message.len;
     }
 
     pub fn poll(self: *NetChannel, buffer: *[MAX_MESSAGE_LENGTH]u8) ?[]u8 {
@@ -284,10 +294,14 @@ pub const NetChannel = struct {
                 else => {
                     std.log.err("got error while reading from socket: {}", .{err});
 
+                    self.errors += 1;
+
                     return null;
                 },
             };
+
             self.buffer_length += amt;
+            self.rx += amt;
         }
 
         if (self.buffer_length >= 2) {
@@ -308,7 +322,7 @@ pub const NetChannel = struct {
         return null;
     }
 
-    pub fn sendTyped(self: NetChannel, comptime T: type, message: T) void {
+    pub fn sendTyped(self: *NetChannel, comptime T: type, message: T) void {
         var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
         var stream = std.io.fixedBufferStream(&buffer);
         std.json.stringify(message, .{}, stream.writer()) catch unreachable;
@@ -494,13 +508,21 @@ pub const Server = struct {
         };
     }
 
-    pub fn handleConnect(self: *Server, channel: NetChannel) !void {
+    pub fn handleConnect(self: *Server, channel_: NetChannel) !void {
+        // TODO: requires mutating because of the `tx` counter.
+        var channel = channel_;
+
         const id = self.latest_client_id;
         self.latest_client_id += 1;
 
         const entity = self.world.spawn().?;
         entity.entity = .{ .player = .{} };
         entity.controller = id;
+
+        channel.sendTyped(ServerMessage, .{ .hello = .{
+            .your_id = id,
+            .tick_length = self.tick_length,
+        } });
 
         try self.clients.append(self.allocator, .{
             .id = id,
@@ -509,11 +531,6 @@ pub const Server = struct {
             .command_queue = .{},
             .world_state_pending = .{},
         });
-
-        channel.sendTyped(ServerMessage, .{ .hello = .{
-            .your_id = id,
-            .tick_length = self.tick_length,
-        } });
     }
 
     fn handleMessage(self: *Server, client: *ServerClient, message: ClientMessage) void {
@@ -530,6 +547,18 @@ pub const Server = struct {
             while (client.channel.pollTyped(ClientMessage, self.allocator)) |message| {
                 self.handleMessage(client, message);
             }
+        }
+        for (self.clients.items, 0..) |*client, i| {
+            if (client.channel.errors <= 50) continue;
+            std.log.err(">50 errors, disconnecting client", .{});
+            if (self.world.get(client.entity)) |client_entity| {
+                client_entity.alive = false;
+            }
+
+            client.channel.tcp_stream.close();
+
+            _ = self.clients.swapRemove(i);
+            break;
         }
         for (self.clients.items) |*client| {
             const cqlen = client.command_queue.length;
@@ -617,6 +646,11 @@ pub const Client = struct {
         self.tick_remainder += delta_warped;
         if (self.tick_remainder > self.tick_length) {
             self.tick_remainder -= self.tick_length;
+
+            if (self.tick_remainder > self.tick_length * 5) {
+                std.log.err("too much time {d}! dropping", .{self.tick_remainder});
+                self.tick_remainder = 0;
+            }
 
             const command_frame = self.input_bundler.commit();
 
@@ -780,6 +814,19 @@ pub const Walkcam = struct {
 
     step_smooth: f32 = 0.0,
 
+    pub fn interpolated(previous: Walkcam, current: Walkcam, ratio: f32) Walkcam {
+        return .{
+            .origin = previous.origin.mix(current.origin, ratio),
+            .velocity = previous.velocity.mix(current.velocity, ratio),
+            .angle = .{
+                previous.angle[0] * (1.0 - ratio) + current.angle[0] * ratio,
+                previous.angle[1] * (1.0 - ratio) + current.angle[1] * ratio,
+            },
+            .state = current.state,
+            .step_smooth = current.step_smooth,
+        };
+    }
+
     pub fn update(self: *Walkcam, map: *collision.BrushModel, delta: f32, command_frame: CommandFrame) void {
         self.angle[0] += command_frame.look[0];
         self.angle[1] += command_frame.look[1];
@@ -810,6 +857,21 @@ pub const Walkcam = struct {
         self.forces(command_frame, delta * 0.5);
         self.physics(map, delta);
         self.forces(command_frame, delta * 0.5);
+
+        if (self.state == .walk) {
+            if (command_frame.jump_time) |jump_time| {
+                const impulse = 10.0;
+
+                const gravity = -20.0;
+
+                const t = (1.0 - jump_time) * delta;
+
+                self.velocity.data[2] = impulse + t * gravity;
+                self.origin.data[2] += impulse * t * 0.5 + gravity * t * t;
+
+                self.state = .fall;
+            }
+        }
     }
 
     pub fn forces(self: *Walkcam, command_frame: CommandFrame, delta: f32) void {
@@ -825,16 +887,9 @@ pub const Walkcam = struct {
         switch (self.state) {
             .fly => self.flyForces(delta, move, 100.0),
             .walk => {
-                self.walkForces(delta, move, 10.0, 200.0, 100.0);
-
-                // TODO: subtick jump
-                if (command_frame.jump_time) |jump_time| {
-                    _ = jump_time;
-                    self.state = .fall;
-                    self.velocity.data[2] = 10.0;
-                }
+                self.walkForces(delta, move, 10.0, 80.0, 5.0);
             },
-            .fall => self.walkForces(delta, move, 2.0, 50.0, 0.0),
+            .fall => self.walkForces(delta, move, 2.0, 20.0, 0.0),
         }
     }
 
@@ -995,7 +1050,9 @@ pub const Walkcam = struct {
             const current_speed = velocity_2d.length();
             if (current_speed == 0.0) break :blk {};
 
-            self.velocity = self.velocity.sub(velocity_2d.mulScalar(@min(current_speed, decel * delta) / current_speed));
+            const target_speed = current_speed * @exp(-delta * decel);
+
+            self.velocity = self.velocity.add(velocity_2d.mulScalar((target_speed - current_speed) / current_speed));
         }
 
         const move_horizontal = move.mul(linalg.Vec3.new(1.0, 1.0, 0.0));
@@ -1254,7 +1311,7 @@ pub fn main() !void {
             var previous_time: f64 = c.glfwGetTime();
             while (true) {
                 const time = c.glfwGetTime();
-                const delta: f64 = @floatCast(time - previous_time);
+                const delta = (time - previous_time);
                 previous_time = time;
 
                 remainder += delta;
@@ -1278,6 +1335,8 @@ pub fn main() !void {
             }
         }
     }
+
+    addr = addr orelse std.net.Address.resolveIp("127.0.0.1", 27043) catch unreachable;
 
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     defer c.glfwTerminate();
@@ -1367,7 +1426,7 @@ pub fn main() !void {
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         const time: f64 = c.glfwGetTime();
-        var delta: f32 = @floatCast(time - previous_time);
+        const delta: f32 = @floatCast((time - previous_time));
         previous_time = time;
 
         var width: c_int = 0;
@@ -1410,7 +1469,7 @@ pub fn main() !void {
 
         var matrix_camera = app.cam_partial.cameraMatrix();
         if (app.client) |client| {
-            var camera_entity: EntityId = .{ .index = 0xFF_FF, .revision = 0xFF_FF }; // TODO: make this sentinel standard
+            var camera_entity: EntityId = .{ .index = 0xFF_FF, .revision = 0xFF_FF }; // TODO: make this sentinel a member of EntityId
             for (client.prediction_partial.entities) |entity| {
                 if (!entity.alive) continue;
                 if (entity.entity == .player) {
@@ -1418,16 +1477,42 @@ pub fn main() !void {
                     camera_entity = entity.id;
                 }
             }
-            for (client.latest_world_state.entities) |entity| {
-                if (!entity.alive) continue;
-                if (std.meta.eql(entity.id, camera_entity)) continue;
+
+            var current_worldstate = client.latest_world_state;
+            var previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 1) orelse current_worldstate;
+
+            // TODO: this is entirely the wrong interpolator
+            var ratio = client.tick_remainder / client.tick_length;
+
+            for (
+                current_worldstate.entities,
+                previous_worldstate.entities,
+            ) |entity_slot, entity_slot_previous| {
+                if (!entity_slot.alive) continue;
+
+                var entity = entity_slot.entity;
+
+                if (std.meta.eql(entity_slot.id, entity_slot_previous.id) and entity_slot_previous.alive) {
+                    inline for (std.meta.fields(Entity)) |field| {
+                        if (entity != @field(Entity, field.name) or
+                            entity_slot_previous.entity != @field(Entity, field.name))
+                            continue;
+
+                        const downcasted = @field(entity, field.name);
+                        const downcasted_previous = @field(entity_slot_previous.entity, field.name);
+
+                        entity = @unionInit(Entity, field.name, downcasted_previous.interpolated(downcasted, ratio));
+                    }
+                }
+                do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
+                if (std.meta.eql(entity_slot.id, camera_entity)) continue;
 
                 do.addObject(.{
                     .pass = .world_opaque,
                     .gl_vao = do.resources.model_cube.gl_vao,
                     .vertex_first = 0,
                     .vertices_count = do.resources.model_cube.vertices_count,
-                    .model_matrix = linalg.Mat4.translationVec(entity.entity.player.origin)
+                    .model_matrix = linalg.Mat4.translationVec(entity.player.origin)
                         .multiply(linalg.Mat4.scaleVec(linalg.Vec3.new(0.6, 0.6, 2.0))),
                     .shader = &do.resources.shader_flat,
                     .color = .{ 1.0, 1.0, 1.0, 1.0 },
@@ -1538,11 +1623,13 @@ pub fn main() !void {
         // do.text("tick pos: {d}", .{app.cam.origin}, 20.0, 52.0, 0.0, 16.0, &app.font);
         // do.text("tick vel: {d}", .{app.cam.velocity}, 20.0, 68.0, 0.0, 16.0, &app.font);
         // do.text("tick distance: {d}", .{app.cam.origin.sub(app.cam_partial.origin).length()}, 20.0, 84.0, 0.0, 16.0, &app.font);
-        // do.rect(20.0, 100.0, 300.0, 20.0, .{ 0, 0, 0, 160 });
-        // do.rect(20.0, 100.0, 300.0 * (app.tick_remainder / app.tick_length), 20.0, .{ 255, 0, 0, 255 });
 
         if (app.actions[@intFromEnum(ActionId.debug4)] > 0.5) {
             if (app.client) |client| {
+                const tx = @as(f32, @floatFromInt(client.channel.tx)) / time;
+                const rx = @as(f32, @floatFromInt(client.channel.rx)) / time;
+
+                do.text("bandwidth: {d:.1}KB/s tx, {d:.1}KB/s rx", .{ tx / 1024.0, rx / 1024.0 }, 20.0, 184.0, 0.0, 16.0, &app.font);
                 do.text("command queue", .{}, 20.0, 200.0, 0.0, 16.0, &app.font);
                 do.rect(20.0, 216.0, 320.0, 60.0, .{ 0, 0, 0, 160 });
 
@@ -1566,6 +1653,9 @@ pub fn main() !void {
                             do.rect(x - 1.0, 216.0, 10.0, 70.0, .{ 0, 38, 96, 128 });
                         }
                     }
+
+                    do.rect(20.0, 100.0, 300.0, 20.0, .{ 0, 0, 0, 160 });
+                    do.rect(20.0, 100.0, 300.0 * (client.tick_remainder / client.tick_length), 20.0, .{ 255, 0, 0, 255 });
                 }
 
                 for (0..client.command_queue.length) |i| {
