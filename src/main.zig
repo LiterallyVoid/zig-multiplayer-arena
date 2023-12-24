@@ -8,6 +8,8 @@ pub const Font = @import("./Font.zig");
 pub const collision = @import("./collision.zig");
 pub const debug_overlay = @import("./debug_overlay.zig");
 pub const net = @import("./net.zig");
+pub const World = @import("./World.zig");
+pub const game = @import("./game.zig");
 const do = &debug_overlay.singleton;
 
 pub const ActionId = enum {
@@ -67,40 +69,11 @@ pub const EventTranslator = struct {
     }
 };
 
-pub const CommandFrame = struct {
-    random: u8 = 0,
-    movement: [3]f32 = .{ 0.0, 0.0, 0.0 },
-    look: [2]f32 = .{ 0.0, 0.0 },
-    jump_time: ?f32 = null,
-
-    pub fn compose(a: CommandFrame, b: CommandFrame, ratio: f32) CommandFrame {
-        return .{
-            .random = a.random,
-
-            .movement = .{
-                a.movement[0] * (1.0 - ratio) + b.movement[0] * ratio,
-                a.movement[1] * (1.0 - ratio) + b.movement[1] * ratio,
-                a.movement[2] * (1.0 - ratio) + b.movement[2] * ratio,
-            },
-            .look = .{
-                a.look[0] + b.look[0],
-                a.look[1] + b.look[1],
-            },
-            .jump_time = if (a.jump_time) |a_jump|
-                a_jump * (1.0 - ratio)
-            else if (b.jump_time) |b_jump|
-                (1.0 - ratio) + b_jump * ratio
-            else
-                null,
-        };
-    }
-};
-
 pub const InputBundler = struct {
-    latest_command_frame: CommandFrame = .{},
+    latest_command_frame: game.CommandFrame = .{},
     latest_command_frame_fraction: f32 = 0.0,
 
-    pub fn integrate(self: *InputBundler, frame: CommandFrame, length: f32) void {
+    pub fn integrate(self: *InputBundler, frame: game.CommandFrame, length: f32) void {
         var ratio: f32 = 0.0;
         if (length > 0.0) {
             ratio = length / (length + self.latest_command_frame_fraction);
@@ -162,11 +135,11 @@ pub const InputBundler = struct {
         return false;
     }
 
-    pub fn partial(self: *InputBundler) CommandFrame {
+    pub fn partial(self: *InputBundler) game.CommandFrame {
         return self.latest_command_frame;
     }
 
-    pub fn commit(self: *InputBundler) CommandFrame {
+    pub fn commit(self: *InputBundler) game.CommandFrame {
         var frame = self.latest_command_frame;
         frame.random = std.crypto.random.int(u8);
 
@@ -241,68 +214,17 @@ test RingBuffer {
     try std.testing.expectEqual(@as(?u8, null), i.peek(2));
 }
 
-pub const Entity = union(enum) {
-    player: Walkcam,
-};
-
-pub const WORLD_MAX_ENTITIES = 128;
-pub const EntitySlot = struct {
-    alive: bool = false,
-    id: EntityId = .{ .index = 0, .revision = 0 },
-    entity: Entity = undefined,
-    controller: ?u32 = null,
-};
-
-pub const EntityId = struct {
-    index: u16,
-    revision: u16,
-};
-
-pub const WorldState = struct {
-    entities: [WORLD_MAX_ENTITIES]EntitySlot = .{.{}} ** WORLD_MAX_ENTITIES,
-
-    pub fn spawn(self: *WorldState) ?*EntitySlot {
-        for (&self.entities, 0..) |*slot, i| {
-            if (slot.alive) continue;
-
-            slot.alive = true;
-            slot.id.index = @intCast(i);
-            slot.id.revision +%= 1;
-
-            if (slot.id.revision == 0) std.log.warn("entity slot {} reused", .{i});
-
-            slot.controller = null;
-
-            return slot;
-        }
-
-        return null;
-    }
-
-    pub fn get(self: *WorldState, id: EntityId) ?*EntitySlot {
-        const slot = &self.entities[id.index];
-        if (!slot.alive or
-            slot.id.index != id.index or
-            slot.id.revision != id.revision)
-        {
-            return null;
-        }
-
-        return slot;
-    }
-};
-
 /// A server's idea of what a client is.
 pub const ServerClient = struct {
     id: u32,
 
     channel: net.Channel,
 
-    entity: EntityId,
-    command_queue: RingBuffer(CommandFrame, 8),
+    entity: World.EntityId,
+    command_queue: RingBuffer(game.CommandFrame, 8),
 
     /// The world state that's currently in flight to the client.
-    world_state_pending: WorldState,
+    world_state_pending: World,
 };
 
 /// All commands that the server can send to the client.
@@ -313,7 +235,7 @@ pub const ServerMessage = union(enum) {
     },
     entity_refresh: struct {
         slot: u16,
-        data: EntitySlot,
+        data: World.EntitySlot,
     },
     tick_report: struct {
         last_frame: u8,
@@ -327,7 +249,7 @@ pub const Server = struct {
 
     map: *collision.BrushModel,
 
-    world: WorldState = .{},
+    world: World = .{},
     clients: std.ArrayListUnmanaged(ServerClient) = .{},
 
     latest_client_id: u32 = 0,
@@ -395,7 +317,7 @@ pub const Server = struct {
         }
         for (self.clients.items) |*client| {
             const cqlen = client.command_queue.length;
-            const command_frame = client.command_queue.pop() orelse CommandFrame{};
+            const command_frame = client.command_queue.pop() orelse game.CommandFrame{};
             const entity = self.world.get(client.entity) orelse {
                 std.log.warn("client has no entity?", .{});
 
@@ -430,7 +352,7 @@ pub const Server = struct {
 /// All commands that the client can send to the server.
 pub const ClientMessage = union(enum) {
     tick: struct {
-        command_frame: CommandFrame,
+        command_frame: game.CommandFrame,
     },
 };
 
@@ -450,15 +372,15 @@ pub const Client = struct {
 
     channel: net.Channel,
 
-    interpolation_queue: RingBuffer(WorldState, 8) = .{},
-    latest_world_state: WorldState = .{},
+    interpolation_queue: RingBuffer(World, 8) = .{},
+    latest_world_state: World = .{},
 
     /// Must be as long as server<->client round-trip latency.
-    command_queue: RingBuffer(CommandFrame, 128) = .{},
+    command_queue: RingBuffer(game.CommandFrame, 128) = .{},
 
-    prediction: std.ArrayListUnmanaged(WorldState) = .{},
+    prediction: std.ArrayListUnmanaged(World) = .{},
     /// The partial prediction frame that should be displayed.
-    prediction_partial: WorldState = .{},
+    prediction_partial: World = .{},
     prediction_dirty: bool = true,
 
     server_command_queue_health_debug: RingBuffer(CommandQueueHealthFrame, 60) = .{},
@@ -500,7 +422,7 @@ pub const Client = struct {
         self.time_since_health += delta;
     }
 
-    pub fn tick(self: *Client, frame: CommandFrame) void {
+    pub fn tick(self: *Client, frame: game.CommandFrame) void {
         self.command_queue.push(frame);
         self.channel.sendTyped(ClientMessage, .{
             .tick = .{
@@ -509,7 +431,7 @@ pub const Client = struct {
         });
     }
 
-    pub fn predict(self: *Client, allocator: std.mem.Allocator, partial_frame: CommandFrame, partial_remainder: f32) void {
+    pub fn predict(self: *Client, allocator: std.mem.Allocator, partial_frame: game.CommandFrame, partial_remainder: f32) void {
         if (self.prediction_dirty) {
             self.prediction.clearRetainingCapacity();
 
@@ -618,301 +540,6 @@ pub const Client = struct {
                 self.interpolation_queue.push(self.latest_world_state);
             },
         }
-    }
-};
-
-pub const Walkcam = struct {
-    pub const MoveOptions = struct {
-        /// steepest angle = acos(floor_max_slope); 0.8 slope ~= 36 degrees
-        floor_max_slope: f32 = 0.8,
-
-        half_extents: linalg.Vec3 = linalg.Vec3.new(0.3, 0.3, 1.0),
-
-        /// Basically random, to reduce the chance of steps breaking due to physics/float inaccuracy.
-        step_height: f32 = 0.30514,
-    };
-
-    pub const State = enum {
-        walk,
-        fall,
-
-        fly,
-    };
-
-    origin: linalg.Vec3 = linalg.Vec3.new(0.0, 0.0, 25.0),
-    velocity: linalg.Vec3 = linalg.Vec3.zero(),
-    angle: [2]f32 = .{ 0.0, 0.0 },
-
-    state: State = .fall,
-
-    step_smooth: f32 = 0.0,
-
-    pub fn interpolated(previous: Walkcam, current: Walkcam, ratio: f32) Walkcam {
-        return .{
-            .origin = previous.origin.mix(current.origin, ratio),
-            .velocity = previous.velocity.mix(current.velocity, ratio),
-            .angle = .{
-                previous.angle[0] * (1.0 - ratio) + current.angle[0] * ratio,
-                previous.angle[1] * (1.0 - ratio) + current.angle[1] * ratio,
-            },
-            .state = current.state,
-            .step_smooth = current.step_smooth,
-        };
-    }
-
-    pub fn update(self: *Walkcam, map: *collision.BrushModel, delta: f32, command_frame: CommandFrame) void {
-        self.angle[0] += command_frame.look[0];
-        self.angle[1] += command_frame.look[1];
-
-        self.angle[0] = @rem(self.angle[0], std.math.tau);
-        self.angle[1] = std.math.clamp(
-            self.angle[1],
-            -std.math.pi * 0.5,
-            std.math.pi * 0.5,
-        );
-
-        // if (self.fast) {
-        //     speed *= 5.0;
-        // }
-
-        // if (self.slow) {
-        //     speed /= 2.0;
-        // }
-
-        const options = MoveOptions{};
-
-        self.step_smooth *= std.math.exp(-delta * 18.0);
-
-        self.forces(command_frame, delta * 0.5);
-        self.physics(map, delta);
-        self.forces(command_frame, delta * 0.5);
-
-        if (self.state == .walk) {
-            if (command_frame.jump_time) |jump_time| {
-                const impulse = 10.0;
-
-                const gravity = -20.0;
-
-                const t = (1.0 - jump_time) * delta;
-
-                self.velocity.data[2] = impulse + t * gravity;
-
-                const distance_to_move_up = impulse * t * 0.5 + gravity * t * t;
-                var fake_velocity = linalg.Vec3.new(0.0, 0.0, distance_to_move_up);
-                _ = flyMove(map, options, &self.origin, &fake_velocity, 1.0);
-
-                self.state = .fall;
-            }
-        }
-    }
-
-    pub fn forces(self: *Walkcam, command_frame: CommandFrame, delta: f32) void {
-        var move_2d = linalg.Vec2.new(
-            command_frame.movement[1],
-            command_frame.movement[0],
-        );
-
-        move_2d = move_2d.rotate(self.angle[0]);
-        var move = move_2d.swizzle(linalg.Vec3, "xy0");
-        move.data[2] = command_frame.movement[2];
-
-        switch (self.state) {
-            .fly => self.flyForces(delta, move, 100.0),
-            .walk => {
-                self.walkForces(delta, move, 10.0, 80.0, 5.0);
-            },
-            .fall => self.walkForces(delta, move, 2.0, 20.0, 0.0),
-        }
-    }
-
-    pub fn physics(self: *Walkcam, map: *const collision.BrushModel, delta: f32) void {
-        const options = MoveOptions{};
-        switch (self.state) {
-            .fly => {
-                _ = flyMove(map, options, &self.origin, &self.velocity, delta);
-            },
-            .walk => {
-                const move = walkMove(map, options, &self.origin, &self.velocity, delta);
-                if (move) |walk_info| {
-                    self.step_smooth += walk_info.step_jump;
-                } else {
-                    self.state = .fall;
-                    _ = flyMove(map, options, &self.origin, &self.velocity, delta);
-                }
-            },
-            .fall => {
-                const move = flyMove(map, options, &self.origin, &self.velocity, delta);
-                if (move.on_ground) {
-                    self.state = .walk;
-                }
-            },
-        }
-    }
-
-    pub fn flyMove(map: *const collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
-        var on_ground = false;
-        const half_extents = options.half_extents;
-
-        var remainder: f32 = delta;
-
-        var normals: [4]linalg.Vec3 = undefined;
-
-        for (0..4) |i| {
-            var step = velocity.*.mulScalar(remainder);
-            if (map.traceBox(position.*, step, half_extents)) |impact| {
-                if (impact.time > 0.0) {
-                    position.* = position.*.add(step.mulScalar(impact.time));
-
-                    remainder *= 1.0 - impact.time;
-                }
-
-                const normal = impact.plane.vec.xyz();
-                if (normal.data[2] > options.floor_max_slope) {
-                    on_ground = true;
-                }
-
-                velocity.* = velocity.*.sub(normal.mulScalar(velocity.*.dot(normal) * 1.005));
-
-                for (normals[0..i]) |previous_normal| {
-                    if (previous_normal.dot(velocity.*) > 1e-6) continue;
-                    if (previous_normal.dot(normal) > 1 - 1e-6) continue;
-                    const edge = previous_normal.cross(normal).normalized();
-                    velocity.* = edge.mulScalar(edge.dot(velocity.*));
-                }
-
-                do.arrow(
-                    .world,
-                    position.*.sub(impact.plane.vec.xyz().mulScalar(0.5)),
-                    impact.plane.vec.xyz().mulScalar(0.2),
-                    .{ 1.0, 0.0, 1.0, 1.0 },
-                );
-
-                normals[i] = normal;
-            } else {
-                position.* = position.*.add(step);
-                remainder = 0;
-                break;
-            }
-        }
-
-        if (remainder > 1e-6) {
-            std.log.warn("{d}% of movement left after tick", .{remainder / delta * 100});
-        }
-
-        return .{
-            .on_ground = on_ground,
-        };
-    }
-
-    pub fn walkMove(map: *const collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
-        step_jump: f32,
-    } {
-
-        // [position + step_position_offset, half_extents_minus_step] describes a bounding box whose bottom face is moved `step_height` units inwards.
-        const step_position_offset = linalg.Vec3.new(0.0, 0.0, options.step_height * 0.5);
-        const half_extents_minus_step = options.half_extents.sub(linalg.Vec3.new(0.0, 0.0, options.step_height * 0.5));
-
-        var attempt_position = position.*;
-        var attempt_velocity = velocity.*;
-        attempt_velocity.data[2] = 0.0;
-
-        // Horizontal collisions.
-        var remainder = delta;
-        for (0..4) |_| {
-            const forwards_target = attempt_velocity.mulScalar(remainder);
-            if (map.traceBox(
-                attempt_position.add(step_position_offset),
-                forwards_target,
-                half_extents_minus_step,
-            )) |impact| {
-                attempt_position = attempt_position.add(forwards_target.mulScalar(impact.time));
-                remainder *= (1.0 - impact.time);
-
-                const normal = impact.plane.vec.xyz();
-                attempt_velocity = attempt_velocity.sub(normal.mulScalar(attempt_velocity.dot(normal) * 1.005));
-            } else {
-                attempt_position = attempt_position.add(forwards_target);
-                remainder = 0.0;
-                break;
-            }
-        }
-
-        var floor_plane: collision.Plane = undefined;
-
-        const step_down_target = -options.step_height * 2.0;
-        if (map.traceBox(
-            attempt_position.add(step_position_offset),
-            linalg.Vec3.new(0.0, 0.0, step_down_target),
-            half_extents_minus_step,
-        )) |step_down_impact| {
-            // We hit something, but it WASN'T GROUND!
-            if (step_down_impact.plane.vec.data[2] <= options.floor_max_slope) return null;
-            attempt_position.data[2] += step_down_target * step_down_impact.time;
-
-            floor_plane = step_down_impact.plane;
-        } else {
-            // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I WAS AFRAID OF, GEOFF!
-            return null;
-        }
-
-        if (map.traceBox(attempt_position.add(step_position_offset), linalg.Vec3.new(0, 0, options.step_height), half_extents_minus_step)) |_| {
-            return null;
-        } else {
-            attempt_position.data[2] += options.step_height;
-        }
-
-        const step_jump =
-            floor_plane.heightFromPoint(linalg.Vec3.new(1.0, 1.0, 0.0).mul(attempt_position)) -
-            floor_plane.heightFromPoint(linalg.Vec3.new(1.0, 1.0, 0.0).mul(position.*)) +
-            (attempt_position.data[2] - position.data[2]);
-
-        position.* = attempt_position;
-        velocity.* = attempt_velocity;
-
-        return .{
-            .step_jump = step_jump,
-        };
-    }
-
-    pub fn walkForces(self: *Walkcam, delta: f32, move: linalg.Vec3, speed: f32, accel: f32, decel: f32) void {
-        self.velocity.data[2] -= 20.0 * delta;
-
-        const velocity_2d = self.velocity.swizzle(linalg.Vec3, "xy0");
-        blk: {
-            const current_speed = velocity_2d.length();
-            if (current_speed == 0.0) break :blk {};
-
-            const target_speed = current_speed * @exp(-delta * decel);
-
-            self.velocity = self.velocity.add(velocity_2d.mulScalar((target_speed - current_speed) / current_speed));
-        }
-
-        const move_horizontal = move.mul(linalg.Vec3.new(1.0, 1.0, 0.0));
-
-        if (move_horizontal.length() > 0.0) {
-            const dir = move_horizontal.normalized();
-            const current_speed = self.velocity.dot(dir);
-            const target_speed = @min(move.length(), 1.0) * speed;
-
-            if (current_speed < target_speed) {
-                self.velocity = self.velocity.add(dir.mulScalar(@min(target_speed - current_speed, accel * delta)));
-            }
-        }
-    }
-
-    pub fn flyForces(self: *Walkcam, delta: f32, move: linalg.Vec3, speed: f32) void {
-        self.velocity = self.velocity.mulScalar(std.math.exp(-delta * 5.0));
-        self.velocity = self.velocity.add(move.mulScalar(delta * speed));
-    }
-
-    pub fn calculateBasis(self: *const Walkcam) linalg.Mat3 {
-        return linalg.Mat3.rotation(linalg.Vec3.new(0.0, 1.0, 0.0), self.angle[1])
-            .multiply(linalg.Mat3.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), self.angle[0]));
-    }
-
-    pub fn cameraMatrix(self: *const Walkcam) linalg.Mat4 {
-        return linalg.Mat4.translationVec(self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5 - self.step_smooth)))
-            .multiply(self.calculateBasis().toMat4());
     }
 };
 
@@ -1257,13 +884,14 @@ pub fn main() !void {
 
         var matrix_camera = linalg.Mat4.identity();
         if (app.client) |client| {
-            var camera_entity: EntityId = .{ .index = 0xFF_FF, .revision = 0xFF_FF }; // TODO: make this sentinel a member of EntityId
+            var camera_entity = World.EntityId.null_handle;
+
             for (client.prediction_partial.entities) |entity| {
                 if (!entity.alive) continue;
-                if (entity.entity == .player) {
-                    matrix_camera = entity.entity.player.cameraMatrix();
-                    camera_entity = entity.id;
-                }
+                if (entity.entity != .player) continue;
+
+                matrix_camera = entity.entity.player.cameraMatrix();
+                camera_entity = entity.id;
             }
 
             const current_worldstate = client.latest_world_state;
@@ -1281,15 +909,15 @@ pub fn main() !void {
                 var entity = entity_slot.entity;
 
                 if (std.meta.eql(entity_slot.id, entity_slot_previous.id) and entity_slot_previous.alive) {
-                    inline for (std.meta.fields(Entity)) |field| {
-                        if (entity != @field(Entity, field.name) or
-                            entity_slot_previous.entity != @field(Entity, field.name))
+                    inline for (std.meta.fields(World.Entity)) |field| {
+                        if (entity != @field(World.Entity, field.name) or
+                            entity_slot_previous.entity != @field(World.Entity, field.name))
                             continue;
 
                         const downcasted = @field(entity, field.name);
                         const downcasted_previous = @field(entity_slot_previous.entity, field.name);
 
-                        entity = @unionInit(Entity, field.name, downcasted_previous.interpolated(downcasted, ratio));
+                        entity = @unionInit(World.Entity, field.name, downcasted_previous.interpolated(downcasted, ratio));
                     }
                 }
                 do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
