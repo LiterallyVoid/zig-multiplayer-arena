@@ -654,7 +654,7 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
         const channel = net_server.accept() catch |err| switch (err) {
             error.WouldBlock => continue,
             else => {
-                std.log.info("error accepting: {}", .{err});
+                std.log.err("error accepting: {}", .{err});
                 continue;
             },
         };
