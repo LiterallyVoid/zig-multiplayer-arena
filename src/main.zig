@@ -1006,21 +1006,9 @@ pub const App = struct {
 
     event_translator: EventTranslator = .{},
 
-    input_bundler: InputBundler = .{},
-
-    cam: Walkcam,
-    cam_partial: Walkcam,
-
     actions: [ActionId.max_enum]f32 = .{0.0} ** ActionId.max_enum,
 
-    timescale: f32 = 1.0,
-
     font: Font,
-
-    tick_length: f32 = 1.0 / 24.0,
-
-    // How many seconds (<1 tick) that still need to be simulated.
-    tick_remainder: f32 = 0.0,
 
     client: ?Client = null,
 
@@ -1031,32 +1019,11 @@ pub const App = struct {
             .allocator = allocator,
 
             // ugly hack: this will be set later
-            .cam = undefined,
-            .cam_partial = undefined,
-
-            // also ugly hack: this will be set later
             .font = undefined,
         };
     }
 
     pub fn update(self: *App, delta: f32) void {
-        self.input_bundler.update(self, delta * self.timescale);
-
-        self.tick_remainder += delta * self.timescale;
-        if (self.tick_remainder > self.tick_length) {
-            const command_frame = self.input_bundler.commit();
-            _ = command_frame;
-
-            self.tick_remainder -= self.tick_length;
-            // self.cam.update(self.tick_length, command_frame);
-        }
-
-        const command_frame = self.input_bundler.partial();
-        _ = command_frame;
-
-        // self.cam_partial = self.cam;
-        // self.cam_partial.update(self.tick_remainder, command_frame);
-
         if (self.client) |*client| {
             client.update(self.allocator, self, delta);
         }
@@ -1066,19 +1033,19 @@ pub const App = struct {
         switch (event) {
             .action => |action| {
                 self.actions[@intFromEnum(action.id)] = action.value;
-                if (action.id == .debug2) {
-                    if (action.pressed) {
-                        if (self.timescale > 0.7) {
-                            self.timescale = 0.2;
-                        } else if (self.timescale > 0.15) {
-                            self.timescale = 0.01;
-                        } else {
-                            self.timescale = 1.0;
-                        }
-                        std.debug.print("timescale = {d}\n", .{self.timescale});
-                    }
-                    return true;
-                }
+                // if (action.id == .debug2) {
+                //     if (action.pressed) {
+                //         if (self.timescale > 0.7) {
+                //             self.timescale = 0.2;
+                //         } else if (self.timescale > 0.15) {
+                //             self.timescale = 0.01;
+                //         } else {
+                //             self.timescale = 1.0;
+                //         }
+                //         std.debug.print("timescale = {d}\n", .{self.timescale});
+                //     }
+                //     return true;
+                // }
             },
 
             else => {},
@@ -1087,7 +1054,6 @@ pub const App = struct {
         if (self.client) |*client| {
             if (client.input_bundler.handleEvent(self, event)) return true;
         }
-        if (self.input_bundler.handleEvent(self, event)) return true;
 
         return false;
     }
@@ -1312,8 +1278,6 @@ pub fn main() !void {
     do.resources.shader_ui_color = try Shader.load(allocator, "zig-out/assets/debug/shader-ui-color");
     defer do.resources.shader_ui_color.deinit();
 
-    app.cam = Walkcam{};
-
     app.font = try Font.load(
         allocator,
         "zig-out/assets/debug/font.otf",
@@ -1323,9 +1287,6 @@ pub fn main() !void {
     defer app.font.deinit();
 
     // c.glEnable(c.GL_CULL_FACE);
-
-    var trace_origin = linalg.Vec3.zero();
-    var trace_direction = linalg.Vec3.zero();
 
     if (addr) |addr_definite| {
         const channel = try net.connect(addr_definite);
@@ -1379,7 +1340,7 @@ pub fn main() !void {
         });
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(linalg.Mat4.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), std.math.pi * 0.5));
 
-        var matrix_camera = app.cam_partial.cameraMatrix();
+        var matrix_camera = linalg.Mat4.identity();
         if (app.client) |client| {
             var camera_entity: EntityId = .{ .index = 0xFF_FF, .revision = 0xFF_FF }; // TODO: make this sentinel a member of EntityId
             for (client.prediction_partial.entities) |entity| {
@@ -1445,44 +1406,6 @@ pub fn main() !void {
             map.draw();
 
             break :map {};
-        }
-
-        var show_ray = true;
-        if (app.actions[@intFromEnum(ActionId.attack1)] > 0.5) {
-            trace_origin = matrix_camera.multiplyVector(linalg.Vec4.new(0.0, 0.0, 0.0, 1.0)).xyz();
-            trace_direction = matrix_camera.multiplyVector(linalg.Vec4.new(1.0, 0.0, 0.0, 0.0)).xyz().mulScalar(20.0);
-            show_ray = false;
-        }
-
-        if (app.actions[@intFromEnum(ActionId.attack2)] > 0.5) {
-            trace_direction.data[0] = 0.0;
-            trace_direction.data[1] = 0.0;
-        }
-
-        if (true) {
-            if (map_bmodel.traceRay(trace_origin, trace_direction)) |impact| {
-                if (show_ray)
-                    do.arrow(.world, trace_origin.add(trace_direction.mulScalar(impact.time * 0.5)), trace_direction.mulScalar(impact.time), .{ 0.0, 0.5, 1.0, 1.0 });
-                do.arrow(
-                    .world,
-                    trace_origin.add(trace_direction.mulScalar(impact.time)),
-                    impact.plane.vec.xyz(),
-                    .{ 0.0, 1.0, 0.0, 1.0 },
-                );
-
-                do.arrow(
-                    .world,
-                    impact.plane.origin,
-                    impact.plane.vec.xyz(),
-                    .{ 1.0, 1.0, 0.0, 1.0 },
-                );
-
-                impact.brush.debug(map_bmodel, false);
-            } else {
-                if (show_ray) {
-                    do.arrow(.world, trace_origin, trace_direction, .{ 0.0, 0.5, 1.0, 1.0 });
-                }
-            }
         }
 
         // TODO: use an arena allocator here
