@@ -493,6 +493,8 @@ pub const App = struct {
 
     captured: bool = false,
 
+    third_person: bool = false,
+
     pub fn init(allocator: std.mem.Allocator) !App {
         return App{
             .allocator = allocator,
@@ -525,6 +527,10 @@ pub const App = struct {
                 //     }
                 //     return true;
                 // }
+
+                if (action.id == .debug3 and action.pressed) {
+                    self.third_person = !self.third_person;
+                }
             },
 
             else => {},
@@ -840,6 +846,10 @@ pub fn main() !void {
                 camera_entity = entity.id;
             }
 
+            if (app.third_person) {
+                matrix_camera = matrix_camera.multiply(linalg.Mat4.translation(-4.0, 0.0, 0.0));
+            }
+
             const current_worldstate = client.latest_world_state;
             const previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 2) orelse current_worldstate;
 
@@ -867,10 +877,19 @@ pub fn main() !void {
                     }
                 }
                 do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
-                if (std.meta.eql(entity_slot.id, camera_entity)) continue;
+                if (std.meta.eql(entity_slot.id, camera_entity) and !app.third_person) continue;
+
+                const f1: u32 = @as(u32, @intFromFloat(time * 60.0)) % 40 + 100;
+                const f2 = f1 + 1;
+                const fr = @mod(@as(f32, @floatCast(time)) * 60.0, 1.0);
 
                 var pose = try player_model.blankPose(frame_allocator);
-                pose.fromCopy(player_model.framePose(1));
+                var pose_anim = try player_model.blankPose(frame_allocator);
+
+                pose_anim.fromInterpolation(player_model.framePose(f1), player_model.framePose(f2), fr);
+
+                pose.fromCopy(player_model.rest_pose);
+                pose.addLayer(pose_anim, 1.0);
 
                 do.addObject(.{
                     .pass = .world_opaque,
@@ -880,9 +899,10 @@ pub fn main() !void {
                     .model_matrix = linalg.Mat4.translationVec(
                         entity.player.origin
                             .sub(linalg.Vec3.new(0.0, 0.0, 1.0)),
-                    ),
+                    )
+                        .multiply(linalg.Mat4.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), -entity.player.angle[0] + std.math.pi * 0.5)),
                     .bone_matrices = try player_model.poseMatrices(frame_allocator, pose),
-                    .shader = &do.resources.shader_flat,
+                    .shader = &shader,
                     .color = .{ 1.0, 1.0, 1.0, 1.0 },
                     .gl_texture = null,
                 });
@@ -905,24 +925,20 @@ pub fn main() !void {
 
         // TODO: use an arena allocator here
         if (false) {
-            var pose_1 = try model.blankPose(allocator);
-            defer pose_1.deinit(allocator);
-
-            var pose_2 = try model.blankPose(allocator);
-            defer pose_2.deinit(allocator);
+            var pose_1 = try model.blankPose(frame_allocator);
+            var pose_2 = try model.blankPose(frame_allocator);
 
             const f1: u32 = @as(u32, @intFromFloat(time * 60.0)) % 80 + 101;
             const f2 = f1 + 1;
             const fr = @mod(@as(f32, @floatCast(time)) * 60.0, 1.0);
 
             pose_1.fromInterpolation(model.framePose(f1), model.framePose(f2), fr);
-            pose_1.fromCopy(model.framePose(101));
+            // pose_1.fromCopy(model.framePose(101));
             pose_2.fromCopy(model.rest_pose);
 
             pose_2.addLayer(pose_1, 1.0);
 
-            const bone_matrices = try model.poseMatrices(allocator, pose_2);
-            defer allocator.free(bone_matrices);
+            const bone_matrices = try model.poseMatrices(frame_allocator, pose_2);
 
             shader.bindWithUniforms(.{
                 .u_matrix_projectionview = matrix_viewmodel_projectionview,
