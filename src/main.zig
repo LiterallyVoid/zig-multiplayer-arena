@@ -330,7 +330,11 @@ pub const Client = struct {
     tick_length: f32 = 1.0 / 24.0,
     tick_remainder: f32 = 0.0,
 
+    time_since_last_world_tick: f32 = 0.0,
+
     pub fn update(self: *Client, app: *const App, delta: f32) void {
+        self.time_since_last_world_tick += delta;
+
         const delta_warped = delta * self.timescale;
 
         self.input_bundler.update(app, delta_warped);
@@ -460,6 +464,8 @@ pub const Client = struct {
 
                     break;
                 }
+
+                self.time_since_last_world_tick = 0.0;
 
                 if (!found_current) {
                     // std.log.err("error: command queue desync?", .{});
@@ -855,8 +861,7 @@ pub fn main() !void {
             const current_worldstate = client.latest_world_state;
             const previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 2) orelse current_worldstate;
 
-            // TODO: this is entirely the wrong interpolator
-            const ratio = client.tick_remainder / client.tick_length;
+            const ratio = client.time_since_last_world_tick / client.tick_length;
 
             for (
                 current_worldstate.entities,

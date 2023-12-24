@@ -106,7 +106,7 @@ pub fn forces(self: *Self, command_frame: game.CommandFrame, delta: f32) void {
     switch (self.state) {
         .fly => self.flyForces(delta, move, 100.0),
         .walk => {
-            self.walkForces(delta, move, 10.0, 80.0, 5.0);
+            self.walkForces(delta, move, 7.0, 80.0, 5.0);
         },
         .fall => self.walkForces(delta, move, 2.0, 20.0, 0.0),
     }
