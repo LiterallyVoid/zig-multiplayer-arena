@@ -671,9 +671,6 @@ pub const Walkcam = struct {
             std.math.pi * 0.5,
         );
 
-        var speed: f32 = 10.0;
-        _ = speed;
-
         // if (self.fast) {
         //     speed *= 5.0;
         // }
@@ -1269,11 +1266,11 @@ pub fn main() !void {
                 }
             }
 
-            var current_worldstate = client.latest_world_state;
-            var previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 2) orelse current_worldstate;
+            const current_worldstate = client.latest_world_state;
+            const previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 2) orelse current_worldstate;
 
             // TODO: this is entirely the wrong interpolator
-            var ratio = client.tick_remainder / client.tick_length;
+            const ratio = client.tick_remainder / client.tick_length;
 
             for (
                 current_worldstate.entities,

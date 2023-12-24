@@ -43,8 +43,8 @@ pub const Brush = struct {
     pub fn debug(self: Brush, bmodel: BrushModel, bevels: bool) void {
         const planes_count = if (bevels) self.planes_count else self.planes_count_no_bevels;
         for (bmodel.planes[self.first_plane..][0..planes_count]) |plane| {
-            var color: [4]f32 = .{ 1.0, 0.3, 0.2, 1.0 };
-            std.debug.assert(@fabs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
+            const color: [4]f32 = .{ 1.0, 0.3, 0.2, 1.0 };
+            std.debug.assert(@abs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
             do.arrow(
                 .world,
                 plane.origin,
@@ -149,7 +149,7 @@ pub const BrushModel = struct {
         var origin: linalg.Vec3 = undefined;
 
         for (triangle) |vertex| {
-            var distance = vertex.dot(direction);
+            const distance = vertex.dot(direction);
             if (distance < max_distance) continue;
 
             max_distance = distance;

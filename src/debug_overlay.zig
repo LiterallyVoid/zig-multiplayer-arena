@@ -161,7 +161,7 @@ pub const DebugOverlay = struct {
 
         var up = linalg.Vec3.new(0.0, 0.0, 1.0);
         const alternateUp = linalg.Vec3.new(1.0, 0.0, 0.0);
-        if (@fabs(up.dot(dir)) > @fabs(alternateUp.dot(dir))) {
+        if (@abs(up.dot(dir)) > @abs(alternateUp.dot(dir))) {
             up = alternateUp;
         }
 
@@ -282,7 +282,7 @@ pub const DebugOverlay = struct {
         }
 
         var x: f32 = x_ - width * gravity;
-        var y: f32 = y_;
+        const y: f32 = y_;
         for (chars) |char| {
             const glyph_id = c.stbtt_FindGlyphIndex(&font.font, char);
             const glyph = font.cacheGlyph(glyph_id);

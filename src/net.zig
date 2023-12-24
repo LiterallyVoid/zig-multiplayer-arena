@@ -19,7 +19,7 @@ pub const Channel = struct {
 
     pub fn send(self: *Channel, message: []const u8) void {
         var length_buf: [2]u8 = undefined;
-        std.mem.writeIntLittle(u16, &length_buf, @intCast(message.len));
+        std.mem.writeInt(u16, &length_buf, @intCast(message.len), .little);
         self.tcp_stream.writeAll(&length_buf) catch {};
         self.tcp_stream.writeAll(message) catch |e| {
             std.log.err("error while writing: {}", .{e});
@@ -48,13 +48,13 @@ pub const Channel = struct {
         }
 
         if (self.buffer_length >= 2) {
-            const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
+            const packet_length = std.mem.readInt(u16, self.buffer[0..2], .little);
 
             if (self.buffer_length < packet_length + 2) {
                 return null;
             }
 
-            std.mem.copy(u8, buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
+            @memcpy(buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
 
             std.mem.copyForwards(u8, &self.buffer, self.buffer[packet_length + 2 ..]);
             self.buffer_length -= packet_length + 2;

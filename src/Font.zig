@@ -82,7 +82,7 @@ pub fn cacheGlyph(self: *Self, glyph: i32) CachedGlyph {
     var offset: [2]c_int = .{ 0, 0 };
     var size: [2]c_int = .{ 0, 0 };
 
-    var sdf = c.stbtt_GetGlyphSDF(
+    const sdf = c.stbtt_GetGlyphSDF(
         &self.font,
         self.scale,
         glyph,
@@ -139,7 +139,7 @@ pub fn cacheGlyph(self: *Self, glyph: i32) CachedGlyph {
         @floatFromInt(atlas_y),
     };
 
-    var cached_glyph = CachedGlyph{
+    const cached_glyph = CachedGlyph{
         .rect = .{
             offset_float[0],
             offset_float[1],

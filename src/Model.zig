@@ -196,20 +196,20 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     const magic = try reader.readBytesNoEof(4);
     std.debug.assert(std.mem.eql(u8, &magic, "aMdl"));
 
-    const version = try reader.readIntLittle(u32);
+    const version = try reader.readInt(u32, .little);
     std.debug.assert(version == 4);
 
-    const vertices_len = try reader.readIntLittle(u32);
-    const vertices_pos = try file.getPos() + try reader.readIntLittle(u32);
+    const vertices_len = try reader.readInt(u32, .little);
+    const vertices_pos = try file.getPos() + try reader.readInt(u32, .little);
 
-    const bones_len = try reader.readIntLittle(u32);
-    const bones_pos = try file.getPos() + try reader.readIntLittle(u32);
+    const bones_len = try reader.readInt(u32, .little);
+    const bones_pos = try file.getPos() + try reader.readInt(u32, .little);
     _ = bones_pos;
-    const bind_pose_pos = try file.getPos() + try reader.readIntLittle(u32);
+    const bind_pose_pos = try file.getPos() + try reader.readInt(u32, .little);
     _ = bind_pose_pos;
 
-    const frames_len = try reader.readIntLittle(u32);
-    const bone_frames_pos = try file.getPos() + try reader.readIntLittle(u32);
+    const frames_len = try reader.readInt(u32, .little);
+    const bone_frames_pos = try file.getPos() + try reader.readInt(u32, .little);
     _ = bone_frames_pos;
 
     const vertices = try allocator.alloc(Vertex, vertices_len);
@@ -218,19 +218,19 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     try file.seekTo(vertices_pos);
     for (vertices) |*vertex| {
         for (&vertex.position) |*element| {
-            element.* = @bitCast(try reader.readIntLittle(u32));
+            element.* = @bitCast(try reader.readInt(u32, .little));
         }
 
         for (&vertex.normal) |*element| {
-            element.* = @bitCast(try reader.readIntLittle(u32));
+            element.* = @bitCast(try reader.readInt(u32, .little));
         }
 
         for (&vertex.bone_indices) |*element| {
-            element.* = try reader.readIntLittle(u8);
+            element.* = try reader.readInt(u8, .little);
         }
 
         for (&vertex.bone_weights) |*element| {
-            element.* = try reader.readIntLittle(u8);
+            element.* = try reader.readInt(u8, .little);
         }
     }
 
@@ -241,7 +241,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
     };
 
     for (0..bones_len) |i| {
-        const name_len = try reader.readIntLittle(u8);
+        const name_len = try reader.readInt(u8, .little);
         const name = try allocator.alloc(u8, name_len);
         errdefer allocator.free(name);
 
@@ -249,7 +249,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 
         var parent: ?u16 = null;
 
-        const parent_id = try reader.readIntLittle(u16);
+        const parent_id = try reader.readInt(u16, .little);
         if (parent_id != 0xFF_FF) {
             std.debug.assert(parent_id < i);
             parent = parent_id;
@@ -257,7 +257,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 
         var bind_pose_inverse: [16]f32 = .{0.0} ** 16;
         for (&bind_pose_inverse) |*element| {
-            element.* = @bitCast(try reader.readIntLittle(u32));
+            element.* = @bitCast(try reader.readInt(u32, .little));
         }
 
         const bone = Bone{
@@ -292,7 +292,7 @@ pub fn load(allocator: std.mem.Allocator, path: []const u8) !Self {
 }
 
 fn loadPose(allocator: std.mem.Allocator, reader: anytype, bones_count: usize) !Pose {
-    var bones = try allocator.alloc(BonePose, bones_count);
+    const bones = try allocator.alloc(BonePose, bones_count);
     errdefer allocator.free(bones);
 
     for (bones) |*bone| {
@@ -301,15 +301,15 @@ fn loadPose(allocator: std.mem.Allocator, reader: anytype, bones_count: usize) !
         var scale: [3]f32 = undefined;
 
         for (&translation) |*element| {
-            element.* = @bitCast(try reader.readIntLittle(u32));
+            element.* = @bitCast(try reader.readInt(u32, .little));
         }
 
         for (&rotation) |*element| {
-            element.* = @bitCast(try reader.readIntLittle(u32));
+            element.* = @bitCast(try reader.readInt(u32, .little));
         }
 
         for (&scale) |*element| {
-            element.* = @bitCast(try reader.readIntLittle(u32));
+            element.* = @bitCast(try reader.readInt(u32, .little));
         }
 
         bone.* = .{

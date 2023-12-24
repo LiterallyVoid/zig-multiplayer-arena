@@ -6,7 +6,7 @@ pub fn buildAssets(b: *std.build.Builder, step: *std.Build.Step) !void {
 
     const root = "assets";
 
-    var dir = try std.fs.cwd().openIterableDir(root, .{});
+    var dir = try std.fs.cwd().openDir(root, .{ .iterate = true });
     defer dir.close();
 
     var walker = try dir.walk(b.allocator);

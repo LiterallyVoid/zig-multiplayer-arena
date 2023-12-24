@@ -219,7 +219,7 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
         pub fn abs(self: Self) Self {
             var result: Self = undefined;
             inline for (self.data, 0..) |_, i| {
-                result.data[i] = @fabs(self.data[i]);
+                result.data[i] = @abs(self.data[i]);
             }
             return result;
         }
@@ -281,7 +281,7 @@ pub fn Vector(comptime dim: comptime_int, comptime Element_: type, comptime mixi
         }
 
         pub fn normalized(self: Self) Self {
-            var len = self.length();
+            const len = self.length();
             if (len == 0.0) {
                 return Self.zero();
             }
@@ -498,14 +498,14 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
         // This only works for mat3 and mat4, but who cares?.
         pub fn rotation(axis: Vec3, radians: Element) Self {
             std.debug.assert(blk: {
-                var len = axis.lengthSquared();
+                const len = axis.lengthSquared();
                 break :blk len > 0.999 and len < 1.001;
             });
 
-            var s = std.math.sin(radians);
-            var c = std.math.cos(radians);
+            const s = std.math.sin(radians);
+            const c = std.math.cos(radians);
 
-            var axis_sq = axis.mul(axis);
+            const axis_sq = axis.mul(axis);
 
             var out = Self.identity();
             out.data[0][0] = c + (axis_sq.data[0] * (1 - c));
@@ -549,7 +549,7 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
         pub fn targetTo(origin: Vec3, direction: Vec3, up: Vec3) Self {
             var forward = direction.normalized();
             var side = forward.cross(up).normalized();
-            var newUp = side.cross(forward).normalized();
+            const newUp = side.cross(forward).normalized();
 
             var mat = Self.identity();
             // invert or something idk im not an expert
@@ -627,7 +627,7 @@ pub const Quaternion = struct {
     }
 
     pub fn fromAngularVelocity(velocity: Vec3) Self {
-        var length = velocity.length() * 0.5;
+        const length = velocity.length() * 0.5;
 
         if (length <= 0.0) {
             return Self{
@@ -640,7 +640,7 @@ pub const Quaternion = struct {
             };
         }
 
-        var half = velocity.mulScalar((std.math.sin(length) / length) * 0.5);
+        const half = velocity.mulScalar((std.math.sin(length) / length) * 0.5);
 
         return Self{
             .data = .{
@@ -653,9 +653,9 @@ pub const Quaternion = struct {
     }
 
     pub fn axisAngle(axis: Vec3, angle: f32) Self {
-        var s = std.math.sin(angle * 0.5);
-        var c = std.math.cos(angle * 0.5);
-        var tmp = axis.mulScalar(s);
+        const s = std.math.sin(angle * 0.5);
+        const c = std.math.cos(angle * 0.5);
+        const tmp = axis.mulScalar(s);
         return Self{ .data = [_]f32{ tmp.data[0], tmp.data[1], tmp.data[2], c } };
     }
 
@@ -665,7 +665,7 @@ pub const Quaternion = struct {
         var tmp = lhs_3.cross(rhs_3);
         tmp = tmp.add(lhs_3.mulScalar(rhs.data[3]));
         tmp = tmp.add(rhs_3.mulScalar(lhs.data[3]));
-        var w = (lhs.data[3] * rhs.data[3]) - lhs_3.dot(rhs_3);
+        const w = (lhs.data[3] * rhs.data[3]) - lhs_3.dot(rhs_3);
         return Self{ .data = [_]f32{ tmp.data[0], tmp.data[1], tmp.data[2], w } };
     }
 
@@ -682,7 +682,7 @@ pub const Quaternion = struct {
     }
 
     pub fn normalized(self: Self) Self {
-        var fac = 1.0 / std.math.sqrt(self.dot(self));
+        const fac = 1.0 / std.math.sqrt(self.dot(self));
         return self.mulScalar(fac);
     }
 
@@ -700,13 +700,13 @@ pub const Quaternion = struct {
             return self_n.mulScalar(1.0 - t).add(other_n.mulScalar(t)).normalized();
         }
 
-        var theta_0 = std.math.acos(dotprod);
-        var theta = theta_0 * t;
-        var sin = std.math.sin(theta);
-        var sin_0 = std.math.sin(theta_0);
+        const theta_0 = std.math.acos(dotprod);
+        const theta = theta_0 * t;
+        const sin = std.math.sin(theta);
+        const sin_0 = std.math.sin(theta_0);
 
-        var s0 = std.math.cos(theta) - (dotprod * (sin / sin_0));
-        var s1 = sin / sin_0;
+        const s0 = std.math.cos(theta) - (dotprod * (sin / sin_0));
+        const s1 = sin / sin_0;
 
         return self_n.mulScalar(s0).add(other_n.mulScalar(s1));
     }
@@ -738,10 +738,10 @@ pub const Quaternion = struct {
     }
 
     pub fn toMatrix(self: Self) Mat3 {
-        var x = self.data[0];
-        var y = self.data[1];
-        var z = self.data[2];
-        var w = self.data[3];
+        const x = self.data[0];
+        const y = self.data[1];
+        const z = self.data[2];
+        const w = self.data[3];
         return Mat3{
             .data = [3][3]f32{
                 [_]f32{
@@ -810,7 +810,7 @@ pub const Mat4 = struct {
     }
 
     pub fn perspective(fovy: f32, aspect: f32, near: f32, far: f32) @This() {
-        var tmp = std.math.tan(fovy * 0.5);
+        const tmp = std.math.tan(fovy * 0.5);
 
         var mat = @This().zero();
         mat.data[0][0] = 1.0 / (aspect * tmp);
@@ -823,7 +823,7 @@ pub const Mat4 = struct {
 
     // Stolen from ccVector.h (https://github.com/jobtalle/ccVector)
     pub fn inverse(self: @This()) @This() {
-        var s = [6]f32{
+        const s = [6]f32{
             self.data[0][0] * self.data[1][1] - self.data[1][0] * self.data[0][1],
             self.data[0][0] * self.data[1][2] - self.data[1][0] * self.data[0][2],
             self.data[0][0] * self.data[1][3] - self.data[1][0] * self.data[0][3],
@@ -831,7 +831,7 @@ pub const Mat4 = struct {
             self.data[0][1] * self.data[1][3] - self.data[1][1] * self.data[0][3],
             self.data[0][2] * self.data[1][3] - self.data[1][2] * self.data[0][3],
         };
-        var c = [6]f32{
+        const c = [6]f32{
             self.data[2][0] * self.data[3][1] - self.data[3][0] * self.data[2][1],
             self.data[2][0] * self.data[3][2] - self.data[3][0] * self.data[2][2],
             self.data[2][0] * self.data[3][3] - self.data[3][0] * self.data[2][3],
