@@ -117,6 +117,9 @@ pub const DebugOverlay = struct {
         shader: *const Shader,
         color: [4]f32,
 
+        /// These must survive until the next `flush`, and will not be freed by the debug overlay.
+        bone_matrices: []linalg.Mat4 = &.{},
+
         gl_texture: ?c.GLuint = null,
     };
 
@@ -379,8 +382,12 @@ pub const DebugOverlay = struct {
 
             object.shader.bindWithUniforms(.{
                 .u_matrix_projectionview = self.projectionview_matrices[@intFromEnum(space)],
+
                 .u_matrix_model = object.model_matrix,
                 .u_matrix_model_normal = object.model_matrix.transpose().inverse().toMat3(),
+
+                .u_bone_matrices = object.bone_matrices,
+
                 .u_color = object.color,
             });
             c.glBindVertexArray(object.gl_vao);
