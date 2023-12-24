@@ -1288,7 +1288,10 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
         remainder += delta;
         while (remainder > @as(f64, @floatCast(server.tick_length))) {
             remainder -= @as(f64, @floatCast(server.tick_length));
+
+            var timer = try std.time.Timer.start();
             server.tick();
+            std.log.info("tick took {d:.3}ms of {d:.3}ms budget", .{ @as(f64, @floatFromInt(timer.read())) / 1_000_000.0, server.tick_length * 1000.0 });
         }
 
         const conn = tcp_server.accept() catch |err| switch (err) {
