@@ -732,6 +732,10 @@ pub fn main() !void {
     model.upload();
     defer model.deinit(allocator);
 
+    var player_model = try Model.load(allocator, "zig-out/assets/x/player.model");
+    player_model.upload();
+    defer player_model.deinit(allocator);
+
     var previous_time: f64 = 0.0;
 
     do.* = debug_overlay.DebugOverlay.init(allocator);
@@ -777,6 +781,11 @@ pub fn main() !void {
     }
 
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
+        var frame_arena = std.heap.ArenaAllocator.init(allocator);
+        defer frame_arena.deinit();
+
+        const frame_allocator = frame_arena.allocator();
+
         const time: f64 = c.glfwGetTime();
         const delta: f32 = @floatCast((time - previous_time));
         previous_time = time;
@@ -860,13 +869,19 @@ pub fn main() !void {
                 do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
                 if (std.meta.eql(entity_slot.id, camera_entity)) continue;
 
+                var pose = try player_model.blankPose(frame_allocator);
+                pose.fromCopy(player_model.framePose(1));
+
                 do.addObject(.{
                     .pass = .world_opaque,
-                    .gl_vao = do.resources.model_cube.gl_vao,
+                    .gl_vao = player_model.gl_vao,
                     .vertex_first = 0,
-                    .vertices_count = do.resources.model_cube.vertices_count,
-                    .model_matrix = linalg.Mat4.translationVec(entity.player.origin)
-                        .multiply(linalg.Mat4.scaleVec(linalg.Vec3.new(0.6, 0.6, 2.0))),
+                    .vertices_count = player_model.vertices_count,
+                    .model_matrix = linalg.Mat4.translationVec(
+                        entity.player.origin
+                            .sub(linalg.Vec3.new(0.0, 0.0, 1.0)),
+                    ),
+                    .bone_matrices = try player_model.poseMatrices(frame_allocator, pose),
                     .shader = &do.resources.shader_flat,
                     .color = .{ 1.0, 1.0, 1.0, 1.0 },
                     .gl_texture = null,
