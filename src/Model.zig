@@ -163,7 +163,9 @@ pub fn blankPose(self: Self, allocator: std.mem.Allocator) !Pose {
 
 /// Return a reference to this model's pose on frame `frame`.
 pub fn framePose(self: Self, frame: usize) Pose {
-    return self.frames[frame];
+    if (self.frames.len == 0) return self.rest_pose;
+
+    return self.frames[std.math.clamp(frame, 0, self.frames.len - 1)];
 }
 
 /// Convert a pose to a list of matrices, to be used by skeletal animation shaders.
