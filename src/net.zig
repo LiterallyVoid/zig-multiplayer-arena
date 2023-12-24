@@ -1,4 +1,5 @@
 const std = @import("std");
+const s2s = @import("s2s");
 
 pub fn setSocketNonblock(socket: std.os.socket_t) void {
     const flags = std.os.fcntl(socket, 3, 0) catch unreachable;
@@ -67,7 +68,8 @@ pub const Channel = struct {
     pub fn sendTyped(self: *Channel, comptime T: type, message: T) void {
         var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
         var stream = std.io.fixedBufferStream(&buffer);
-        std.json.stringify(message, .{}, stream.writer()) catch unreachable;
+
+        s2s.serialize(stream.writer(), T, message) catch unreachable;
 
         const encoded = stream.getWritten();
 
@@ -76,13 +78,14 @@ pub const Channel = struct {
         self.send(encoded);
     }
 
-    pub fn pollTyped(self: *Channel, comptime T: type, allocator: std.mem.Allocator) ?T {
+    pub fn pollTyped(self: *Channel, comptime T: type) ?T {
         var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
         const bytes = self.poll(&buffer) orelse return null;
 
         // std.log.info("received JSON packet: {s}", .{bytes});
 
-        return std.json.parseFromSliceLeaky(T, allocator, bytes, .{}) catch unreachable;
+        var stream = std.io.fixedBufferStream(bytes);
+        return s2s.deserialize(stream.reader(), T) catch unreachable;
     }
 };
 

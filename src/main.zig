@@ -377,7 +377,7 @@ pub const Server = struct {
 
     pub fn tick(self: *Server) void {
         for (self.clients.items) |*client| {
-            while (client.channel.pollTyped(ClientMessage, self.allocator)) |message| {
+            while (client.channel.pollTyped(ClientMessage)) |message| {
                 self.handleMessage(client, message);
             }
         }
@@ -471,7 +471,7 @@ pub const Client = struct {
     tick_length: f32 = 1.0 / 24.0,
     tick_remainder: f32 = 0.0,
 
-    pub fn update(self: *Client, allocator: std.mem.Allocator, app: *const App, delta: f32) void {
+    pub fn update(self: *Client, app: *const App, delta: f32) void {
         const delta_warped = delta * self.timescale;
 
         self.input_bundler.update(app, delta_warped);
@@ -490,7 +490,7 @@ pub const Client = struct {
             self.tick(command_frame);
         }
 
-        while (self.channel.pollTyped(ServerMessage, allocator)) |message| {
+        while (self.channel.pollTyped(ServerMessage)) |message| {
             self.handleMessage(message);
         }
 
@@ -943,7 +943,7 @@ pub const App = struct {
 
     pub fn update(self: *App, delta: f32) void {
         if (self.client) |*client| {
-            client.update(self.allocator, self, delta);
+            client.update(self, delta);
         }
     }
 

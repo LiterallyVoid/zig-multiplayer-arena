@@ -85,6 +85,12 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = optimize,
     });
 
+    const s2s = b.createModule(.{
+        .source_file = .{
+            .path = "deps/s2s/s2s.zig",
+        },
+    });
+
     inline for (.{ tests, exe }) |compile| {
         compile.linkLibC();
 
@@ -96,6 +102,8 @@ pub fn build(b: *std.build.Builder) !void {
 
         compile.addCSourceFile(.{ .file = .{ .path = "deps/stb/stb.c" }, .flags = &.{} });
         compile.addIncludePath(.{ .path = "deps/stb/" });
+
+        compile.addModule("s2s", s2s);
     }
 
     b.installArtifact(exe);
