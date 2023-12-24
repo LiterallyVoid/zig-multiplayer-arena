@@ -1260,6 +1260,52 @@ pub const App = struct {
     }
 };
 
+pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) !void {
+    var map = try Model.load(allocator, "zig-out/assets/x/test-map.model");
+    defer map.deinit(allocator);
+
+    var map_bmodel = try collision.BrushModel.fromModelVertices(allocator, map.vertices);
+    defer map_bmodel.deinit(allocator);
+
+    var server = Server.init(allocator, &map_bmodel);
+
+    var tcp_server = std.net.StreamServer.init(.{
+        .reuse_address = true,
+    });
+    try tcp_server.listen(listen_address);
+    std.log.info("Server listening on {}", .{listen_address});
+
+    setNonblock(tcp_server.sockfd.?);
+
+    var remainder: f64 = 0.0;
+
+    var previous_time = std.time.nanoTimestamp();
+    while (true) {
+        const time = std.time.nanoTimestamp();
+        const delta = @as(f64, @floatFromInt(time - previous_time)) / 1_000_000_000.0;
+        previous_time = time;
+
+        remainder += delta;
+        while (remainder > @as(f64, @floatCast(server.tick_length))) {
+            remainder -= @as(f64, @floatCast(server.tick_length));
+            server.tick();
+        }
+
+        const conn = tcp_server.accept() catch |err| switch (err) {
+            error.WouldBlock => continue,
+            else => {
+                std.log.info("error accepting: {}", .{err});
+                continue;
+            },
+        };
+        setNonblock(conn.stream.handle);
+
+        try server.handleConnect(.{
+            .tcp_stream = conn.stream,
+        });
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = if (std.debug.sys_can_stack_trace) 10 else 0 }){};
     defer _ = gpa.deinit();
@@ -1287,52 +1333,8 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, arg, "--dedicated")) {
-            std.log.err("Doing a busy loop", .{});
-
-            _ = c.glfwInit();
-            defer c.glfwTerminate();
-
-            var map = try Model.load(allocator, "zig-out/assets/x/test-map.model");
-            defer map.deinit(allocator);
-
-            var map_bmodel = try collision.BrushModel.fromModelVertices(allocator, map.vertices);
-            defer map_bmodel.deinit(allocator);
-
-            var server = Server.init(allocator, &map_bmodel);
-
-            var tcp_server = std.net.StreamServer.init(.{
-                .reuse_address = true,
-            });
-            try tcp_server.listen(addr.?);
-            setNonblock(tcp_server.sockfd.?);
-
-            var remainder: f64 = 0.0;
-
-            var previous_time: f64 = c.glfwGetTime();
-            while (true) {
-                const time = c.glfwGetTime();
-                const delta = (time - previous_time);
-                previous_time = time;
-
-                remainder += delta;
-                while (remainder > @as(f64, @floatCast(server.tick_length))) {
-                    remainder -= @as(f64, @floatCast(server.tick_length));
-                    server.tick();
-                }
-
-                const conn = tcp_server.accept() catch |err| switch (err) {
-                    error.WouldBlock => continue,
-                    else => {
-                        std.log.info("error accepting: {}", .{err});
-                        continue;
-                    },
-                };
-                setNonblock(conn.stream.handle);
-
-                try server.handleConnect(.{
-                    .tcp_stream = conn.stream,
-                });
-            }
+            try runServer(allocator, addr.?);
+            return;
         }
     }
 
