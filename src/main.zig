@@ -7,12 +7,8 @@ pub const Model = @import("./Model.zig");
 pub const Font = @import("./Font.zig");
 pub const collision = @import("./collision.zig");
 pub const debug_overlay = @import("./debug_overlay.zig");
+pub const net = @import("./net.zig");
 const do = &debug_overlay.singleton;
-
-pub fn setNonblock(socket: std.os.socket_t) void {
-    const flags = std.os.fcntl(socket, 3, 0) catch unreachable;
-    _ = std.os.fcntl(socket, 4, flags | std.os.SOCK.NONBLOCK) catch unreachable;
-}
 
 pub const ActionId = enum {
     attack1,
@@ -263,87 +259,6 @@ pub const InputBundler = struct {
     }
 };
 
-pub const NetChannel = struct {
-    const MAX_MESSAGE_LENGTH = 2048;
-
-    tcp_stream: std.net.Stream,
-    buffer: [MAX_MESSAGE_LENGTH]u8 = undefined,
-    buffer_length: usize = 0,
-
-    tx: usize = 0,
-    rx: usize = 0,
-    errors: usize = 0,
-
-    pub fn send(self: *NetChannel, message: []const u8) void {
-        var length_buf: [2]u8 = undefined;
-        std.mem.writeIntLittle(u16, &length_buf, @intCast(message.len));
-        self.tcp_stream.writeAll(&length_buf) catch {};
-        self.tcp_stream.writeAll(message) catch |e| {
-            std.log.err("error while writing: {}", .{e});
-            self.errors += 1;
-            return;
-        };
-
-        self.tx += message.len;
-    }
-
-    pub fn poll(self: *NetChannel, buffer: *[MAX_MESSAGE_LENGTH]u8) ?[]u8 {
-        if (self.buffer_length < self.buffer.len) read_stream: {
-            const amt = self.tcp_stream.read(self.buffer[self.buffer_length..]) catch |err| switch (err) {
-                error.WouldBlock => break :read_stream,
-                else => {
-                    std.log.err("got error while reading from socket: {}", .{err});
-
-                    self.errors += 1;
-
-                    return null;
-                },
-            };
-
-            self.buffer_length += amt;
-            self.rx += amt;
-        }
-
-        if (self.buffer_length >= 2) {
-            const packet_length = std.mem.readIntLittle(u16, self.buffer[0..2]);
-
-            if (self.buffer_length < packet_length + 2) {
-                return null;
-            }
-
-            std.mem.copy(u8, buffer[0..packet_length], self.buffer[2 .. packet_length + 2]);
-
-            std.mem.copyForwards(u8, &self.buffer, self.buffer[packet_length + 2 ..]);
-            self.buffer_length -= packet_length + 2;
-
-            return buffer[0..packet_length];
-        }
-
-        return null;
-    }
-
-    pub fn sendTyped(self: *NetChannel, comptime T: type, message: T) void {
-        var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&buffer);
-        std.json.stringify(message, .{}, stream.writer()) catch unreachable;
-
-        const encoded = stream.getWritten();
-
-        // std.log.info("sending JSON packet: {s}", .{encoded});
-
-        self.send(encoded);
-    }
-
-    pub fn pollTyped(self: *NetChannel, comptime T: type, allocator: std.mem.Allocator) ?T {
-        var buffer: [MAX_MESSAGE_LENGTH]u8 = undefined;
-        const bytes = self.poll(&buffer) orelse return null;
-
-        // std.log.info("received JSON packet: {s}", .{bytes});
-
-        return std.json.parseFromSliceLeaky(T, allocator, bytes, .{}) catch unreachable;
-    }
-};
-
 pub fn RingBuffer(comptime T: type, comptime limit: u32) type {
     return struct {
         const Self = @This();
@@ -463,7 +378,7 @@ pub const WorldState = struct {
 pub const ServerClient = struct {
     id: u32,
 
-    channel: NetChannel,
+    channel: net.Channel,
 
     entity: EntityId,
     command_queue: RingBuffer(CommandFrame, 8),
@@ -508,7 +423,7 @@ pub const Server = struct {
         };
     }
 
-    pub fn handleConnect(self: *Server, channel_: NetChannel) !void {
+    pub fn handleConnect(self: *Server, channel_: net.Channel) !void {
         // TODO: requires mutating because of the `tx` counter.
         var channel = channel_;
 
@@ -615,7 +530,7 @@ pub const Client = struct {
     /// Must be synced to server's ID of self
     id: u32 = 0,
 
-    channel: NetChannel,
+    channel: net.Channel,
 
     interpolation_queue: RingBuffer(WorldState, 8) = .{},
     latest_world_state: WorldState = .{},
@@ -1270,14 +1185,9 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
     defer map_bmodel.deinit(allocator);
 
     var server = Server.init(allocator, &map_bmodel);
-
-    var tcp_server = std.net.StreamServer.init(.{
-        .reuse_address = true,
-    });
-    try tcp_server.listen(listen_address);
+    var net_server = net.Server.init();
+    try net_server.listen(listen_address);
     std.log.info("Server listening on {}", .{listen_address});
-
-    setNonblock(tcp_server.sockfd.?);
 
     var remainder: f64 = 0.0;
 
@@ -1296,18 +1206,15 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
             std.log.info("tick took {d:.3}ms of {d:.3}ms budget", .{ @as(f64, @floatFromInt(timer.read())) / 1_000_000.0, server.tick_length * 1000.0 });
         }
 
-        const conn = tcp_server.accept() catch |err| switch (err) {
+        const channel = net_server.accept() catch |err| switch (err) {
             error.WouldBlock => continue,
             else => {
                 std.log.info("error accepting: {}", .{err});
                 continue;
             },
         };
-        setNonblock(conn.stream.handle);
 
-        try server.handleConnect(.{
-            .tcp_stream = conn.stream,
-        });
+        try server.handleConnect(channel);
     }
 }
 
@@ -1421,13 +1328,11 @@ pub fn main() !void {
     var trace_direction = linalg.Vec3.zero();
 
     if (addr) |addr_definite| {
-        const stream = try std.net.tcpConnectToAddress(addr_definite);
-
-        setNonblock(stream.handle);
+        const channel = try net.connect(addr_definite);
 
         app.client = Client{
             .map = &map_bmodel,
-            .channel = NetChannel{ .tcp_stream = stream },
+            .channel = channel,
         };
     }
 
