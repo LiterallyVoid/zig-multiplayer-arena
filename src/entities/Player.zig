@@ -13,7 +13,7 @@ pub const MoveOptions = struct {
     /// steepest angle = acos(floor_max_slope); 0.8 slope ~= 36 degrees
     floor_max_slope: f32 = 0.8,
 
-    half_extents: linalg.Vec3 = linalg.Vec3.new(0.3, 0.3, 1.0),
+    half_extents: linalg.Vec3 = linalg.Vec3.new(0.4, 0.4, 1.0),
 
     /// Basically random, to reduce the chance of steps breaking due to physics/float inaccuracy.
     step_height: f32 = 0.30514,
