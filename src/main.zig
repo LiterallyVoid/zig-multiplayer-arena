@@ -672,7 +672,7 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = if (std.debug.sys_can_stack_trace) 10 else 0 }){};
     defer _ = gpa.deinit();
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
@@ -786,6 +786,8 @@ pub fn main() !void {
         };
     }
 
+    var walk_anim_time: f32 = 0.0;
+
     while (c.glfwWindowShouldClose(window) == c.GLFW_FALSE) {
         var frame_arena = std.heap.ArenaAllocator.init(allocator);
         defer frame_arena.deinit();
@@ -876,12 +878,14 @@ pub fn main() !void {
                         entity = @unionInit(World.Entity, field.name, downcasted_previous.interpolated(downcasted, ratio));
                     }
                 }
+
+                walk_anim_time += entity.player.velocity.mul(linalg.Vec3.new(1.0, 1.0, 0.0)).length() * delta / 0.1;
                 do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
                 if (std.meta.eql(entity_slot.id, camera_entity) and !app.third_person) continue;
 
-                const f1: u32 = @as(u32, @intFromFloat(time * 60.0)) % 40 + 100;
+                const f1: u32 = @as(u32, @intFromFloat(walk_anim_time / 40.0 * 60.0)) % 40 + 100;
                 const f2 = f1 + 1;
-                const fr = @mod(@as(f32, @floatCast(time)) * 60.0, 1.0);
+                const fr = @mod(@as(f32, @floatCast(walk_anim_time / 40.0)) * 60.0, 1.0);
 
                 var pose = try player_model.blankPose(frame_allocator);
                 var pose_anim = try player_model.blankPose(frame_allocator);
