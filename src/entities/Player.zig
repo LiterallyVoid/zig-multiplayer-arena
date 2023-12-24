@@ -15,7 +15,7 @@ pub const MoveOptions = struct {
 
     half_extents: linalg.Vec3 = linalg.Vec3.new(0.4, 0.4, 1.0),
 
-    /// Basically random, to reduce the chance of steps breaking due to physics/float inaccuracy.
+    /// Basically random, to reduce the chance of mappers building steps that randomly break due to physics/float inaccuracy.
     step_height: f32 = 0.30514,
 };
 
