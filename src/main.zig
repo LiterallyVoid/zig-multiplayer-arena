@@ -850,7 +850,6 @@ pub const Walkcam = struct {
         // }
 
         const options = MoveOptions{};
-        _ = options;
 
         self.step_smooth *= std.math.exp(-delta * 18.0);
 
@@ -867,7 +866,10 @@ pub const Walkcam = struct {
                 const t = (1.0 - jump_time) * delta;
 
                 self.velocity.data[2] = impulse + t * gravity;
-                self.origin.data[2] += impulse * t * 0.5 + gravity * t * t;
+
+                const distance_to_move_up = impulse * t * 0.5 + gravity * t * t;
+                var fake_velocity = linalg.Vec3.new(0.0, 0.0, distance_to_move_up);
+                _ = flyMove(map, options, &self.origin, &fake_velocity, 1.0);
 
                 self.state = .fall;
             }
