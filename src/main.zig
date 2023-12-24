@@ -1479,7 +1479,7 @@ pub fn main() !void {
             }
 
             var current_worldstate = client.latest_world_state;
-            var previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 1) orelse current_worldstate;
+            var previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 2) orelse current_worldstate;
 
             // TODO: this is entirely the wrong interpolator
             var ratio = client.tick_remainder / client.tick_length;
