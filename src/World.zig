@@ -57,3 +57,27 @@ pub fn get(self: *Self, id: EntityId) ?*EntitySlot {
 
     return slot;
 }
+
+pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
+    var interpolated = Self{};
+
+    for (previous.entities, current.entities, &interpolated.entities) |prev_entity, cur_entity, *interp_entity| {
+        if (!cur_entity.alive) continue;
+        if (!prev_entity.alive or prev_entity.id.revision != cur_entity.id.revision or std.meta.activeTag(prev_entity.entity) != std.meta.activeTag(cur_entity.entity)) {
+            continue;
+        }
+
+        interp_entity.entity =
+            switch (cur_entity.entity) {
+            inline else => |payload, tag| blk: {
+                const interpolated_payload =
+                    @field(prev_entity.entity, @tagName(tag))
+                    .interpolate(payload, 1.0 - ratio);
+
+                break :blk @unionInit(Entity, @tagName(tag), interpolated_payload);
+            },
+        };
+    }
+
+    return interpolated;
+}

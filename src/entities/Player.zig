@@ -34,7 +34,7 @@ state: State = .fall,
 
 step_smooth: f32 = 0.0,
 
-pub fn interpolated(previous: Self, current: Self, ratio: f32) Self {
+pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
     return .{
         .origin = previous.origin.mix(current.origin, ratio),
         .velocity = previous.velocity.mix(current.velocity, ratio),

@@ -863,26 +863,12 @@ pub fn main() !void {
 
             const ratio = client.time_since_last_world_tick / client.tick_length;
 
-            for (
-                current_worldstate.entities,
-                previous_worldstate.entities,
-            ) |entity_slot, entity_slot_previous| {
+            const worldstate = current_worldstate.interpolate(previous_worldstate, ratio);
+
+            for (worldstate.entities) |entity_slot| {
                 if (!entity_slot.alive) continue;
 
-                var entity = entity_slot.entity;
-
-                if (std.meta.eql(entity_slot.id, entity_slot_previous.id) and entity_slot_previous.alive) {
-                    inline for (std.meta.fields(World.Entity)) |field| {
-                        if (entity != @field(World.Entity, field.name) or
-                            entity_slot_previous.entity != @field(World.Entity, field.name))
-                            continue;
-
-                        const downcasted = @field(entity, field.name);
-                        const downcasted_previous = @field(entity_slot_previous.entity, field.name);
-
-                        entity = @unionInit(World.Entity, field.name, downcasted_previous.interpolated(downcasted, ratio));
-                    }
-                }
+                const entity = entity_slot.entity;
 
                 walk_anim_time += entity.player.velocity.mul(linalg.Vec3.new(1.0, 1.0, 0.0)).length() * delta / 0.1;
                 do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
