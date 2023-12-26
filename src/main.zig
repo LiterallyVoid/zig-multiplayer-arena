@@ -16,6 +16,7 @@ const do = &debug_overlay.singleton;
 pub const ActionId = enum {
     attack1,
     attack2,
+    reload,
 
     forward,
     back,
@@ -86,22 +87,29 @@ pub const InputBundler = struct {
 
     pub fn update(self: *InputBundler, app: *const App, slice_length: f32) void {
         // TODO: These should probably take angle into account now
-        const slice_frame = .{
-            .movement = .{
-                app.actions[@intFromEnum(ActionId.forward)] -
-                    app.actions[@intFromEnum(ActionId.back)],
+        const slice_frame = .{ .movement = .{
+            app.actions[@intFromEnum(ActionId.forward)] -
+                app.actions[@intFromEnum(ActionId.back)],
 
-                app.actions[@intFromEnum(ActionId.left)] -
-                    app.actions[@intFromEnum(ActionId.right)],
+            app.actions[@intFromEnum(ActionId.left)] -
+                app.actions[@intFromEnum(ActionId.right)],
 
-                app.actions[@intFromEnum(ActionId.jump)] -
-                    app.actions[@intFromEnum(ActionId.crouch)],
-            },
-            .jump_time = if (app.actions[@intFromEnum(ActionId.jump)] > 0.5)
+            app.actions[@intFromEnum(ActionId.jump)] -
+                app.actions[@intFromEnum(ActionId.crouch)],
+        }, .impulses = .{
+            if (app.actions[@intFromEnum(ActionId.jump)] > 0.5)
                 @as(f32, 0.0)
             else
                 null,
-        };
+            if (app.actions[@intFromEnum(ActionId.attack1)] > 0.5)
+                @as(f32, 0.0)
+            else
+                null,
+            if (app.actions[@intFromEnum(ActionId.reload)] > 0.5)
+                @as(f32, 0.0)
+            else
+                null,
+        } };
 
         self.integrate(slice_frame, slice_length);
     }

@@ -75,7 +75,7 @@ pub fn update(self: *Self, map: *collision.BrushModel, delta: f32, command_frame
     self.forces(command_frame, delta * 0.5);
 
     if (self.state == .walk) {
-        if (command_frame.jump_time) |jump_time| {
+        if (command_frame.getImpulse(.jump)) |jump_time| {
             const impulse = 10.0;
 
             const gravity = -20.0;
