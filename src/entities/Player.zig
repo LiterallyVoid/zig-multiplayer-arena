@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const game = @import("../game.zig");
+const World = @import("../world.zig").World;
 
 const linalg = @import("../linalg.zig");
 const collision = @import("../collision.zig");
@@ -34,6 +35,8 @@ state: State = .fall,
 
 step_smooth: f32 = 0.0,
 
+command_frame: game.CommandFrame = .{},
+
 pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
     return .{
         .origin = previous.origin.mix(current.origin, ratio),
@@ -47,9 +50,9 @@ pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
     };
 }
 
-pub fn update(self: *Self, map: *collision.BrushModel, delta: f32, command_frame: game.CommandFrame) void {
-    self.angle[0] += command_frame.look[0];
-    self.angle[1] += command_frame.look[1];
+pub fn tick_movement(self: *Self, world: World, delta: f32) void {
+    self.angle[0] += self.command_frame.look[0];
+    self.angle[1] += self.command_frame.look[1];
 
     self.angle[0] = @rem(self.angle[0], std.math.tau);
     self.angle[1] = std.math.clamp(
@@ -70,12 +73,12 @@ pub fn update(self: *Self, map: *collision.BrushModel, delta: f32, command_frame
 
     self.step_smooth *= std.math.exp(-delta * 18.0);
 
-    self.forces(command_frame, delta * 0.5);
-    self.physics(map, delta);
-    self.forces(command_frame, delta * 0.5);
+    self.forces(self.command_frame, delta * 0.5);
+    self.physics(world, delta);
+    self.forces(self.command_frame, delta * 0.5);
 
     if (self.state == .walk) {
-        if (command_frame.getImpulse(.jump)) |jump_time| {
+        if (self.command_frame.getImpulse(.jump)) |jump_time| {
             const impulse = 10.0;
 
             const gravity = -20.0;
@@ -86,7 +89,7 @@ pub fn update(self: *Self, map: *collision.BrushModel, delta: f32, command_frame
 
             const distance_to_move_up = impulse * t * 0.5 + gravity * t * t;
             var fake_velocity = linalg.Vec3.new(0.0, 0.0, distance_to_move_up);
-            _ = flyMove(map, options, &self.origin, &fake_velocity, 1.0);
+            _ = flyMove(world, options, &self.origin, &fake_velocity, 1.0);
 
             self.state = .fall;
         }
@@ -112,23 +115,23 @@ pub fn forces(self: *Self, command_frame: game.CommandFrame, delta: f32) void {
     }
 }
 
-pub fn physics(self: *Self, map: *const collision.BrushModel, delta: f32) void {
+pub fn physics(self: *Self, world: World, delta: f32) void {
     const options = MoveOptions{};
     switch (self.state) {
         .fly => {
-            _ = flyMove(map, options, &self.origin, &self.velocity, delta);
+            _ = flyMove(world, options, &self.origin, &self.velocity, delta);
         },
         .walk => {
-            const move = walkMove(map, options, &self.origin, &self.velocity, delta);
+            const move = walkMove(world, options, &self.origin, &self.velocity, delta);
             if (move) |walk_info| {
                 self.step_smooth += walk_info.step_jump;
             } else {
                 self.state = .fall;
-                _ = flyMove(map, options, &self.origin, &self.velocity, delta);
+                _ = flyMove(world, options, &self.origin, &self.velocity, delta);
             }
         },
         .fall => {
-            const move = flyMove(map, options, &self.origin, &self.velocity, delta);
+            const move = flyMove(world, options, &self.origin, &self.velocity, delta);
             if (move.on_ground) {
                 self.state = .walk;
             }
@@ -136,7 +139,7 @@ pub fn physics(self: *Self, map: *const collision.BrushModel, delta: f32) void {
     }
 }
 
-pub fn flyMove(map: *const collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
+pub fn flyMove(world: World, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
     var on_ground = false;
     const half_extents = options.half_extents;
 
@@ -146,7 +149,7 @@ pub fn flyMove(map: *const collision.BrushModel, options: MoveOptions, position:
 
     for (0..4) |i| {
         var step = velocity.*.mulScalar(remainder);
-        if (map.traceBox(position.*, step, half_extents)) |impact| {
+        if (world.traceBox(position.*, step, half_extents)) |impact| {
             if (impact.time > 0.0) {
                 position.* = position.*.add(step.mulScalar(impact.time));
 
@@ -191,7 +194,7 @@ pub fn flyMove(map: *const collision.BrushModel, options: MoveOptions, position:
     };
 }
 
-pub fn walkMove(map: *const collision.BrushModel, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
+pub fn walkMove(world: World, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
     step_jump: f32,
 } {
 
@@ -207,7 +210,7 @@ pub fn walkMove(map: *const collision.BrushModel, options: MoveOptions, position
     var remainder = delta;
     for (0..4) |_| {
         const forwards_target = attempt_velocity.mulScalar(remainder);
-        if (map.traceBox(
+        if (world.traceBox(
             attempt_position.add(step_position_offset),
             forwards_target,
             half_extents_minus_step,
@@ -227,7 +230,7 @@ pub fn walkMove(map: *const collision.BrushModel, options: MoveOptions, position
     var floor_plane: collision.Plane = undefined;
 
     const step_down_target = -options.step_height * 2.0;
-    if (map.traceBox(
+    if (world.traceBox(
         attempt_position.add(step_position_offset),
         linalg.Vec3.new(0.0, 0.0, step_down_target),
         half_extents_minus_step,
@@ -242,7 +245,7 @@ pub fn walkMove(map: *const collision.BrushModel, options: MoveOptions, position
         return null;
     }
 
-    if (map.traceBox(attempt_position.add(step_position_offset), linalg.Vec3.new(0, 0, options.step_height), half_extents_minus_step)) |_| {
+    if (world.traceBox(attempt_position.add(step_position_offset), linalg.Vec3.new(0, 0, options.step_height), half_extents_minus_step)) |_| {
         return null;
     } else {
         attempt_position.data[2] += options.step_height;

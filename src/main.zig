@@ -8,7 +8,7 @@ pub const Font = @import("./Font.zig");
 pub const collision = @import("./collision.zig");
 pub const debug_overlay = @import("./debug_overlay.zig");
 pub const net = @import("./net.zig");
-pub const World = @import("./World.zig");
+pub const world = @import("./world.zig");
 pub const RingBuffer = @import("./ring_buffer.zig").RingBuffer;
 pub const game = @import("./game.zig");
 const do = &debug_overlay.singleton;
@@ -165,22 +165,23 @@ pub const ServerClient = struct {
 
     channel: net.Channel,
 
-    entity: World.EntityId,
+    entity: world.State.EntityId,
     command_queue: RingBuffer(game.CommandFrame, 8),
 
     /// The world state that's currently in flight to the client.
-    world_state_pending: World,
+    world_state_pending: world.State,
 };
 
 /// All commands that the server can send to the client.
 pub const ServerMessage = union(enum) {
     hello: struct {
         your_id: u32,
+        your_player: world.State.EntityId,
         tick_length: f32,
     },
     entity_refresh: struct {
         slot: u16,
-        data: World.EntitySlot,
+        data: world.State.EntitySlot,
     },
     tick_report: struct {
         last_frame: u8,
@@ -194,7 +195,7 @@ pub const Server = struct {
 
     map: *collision.BrushModel,
 
-    world: World = .{},
+    world: world.State = .{},
     clients: std.ArrayListUnmanaged(ServerClient) = .{},
 
     latest_client_id: u32 = 0,
@@ -221,6 +222,7 @@ pub const Server = struct {
 
         channel.sendTyped(ServerMessage, .{ .hello = .{
             .your_id = id,
+            .your_player = entity.id,
             .tick_length = self.tick_length,
         } });
 
@@ -261,8 +263,7 @@ pub const Server = struct {
             break;
         }
         for (self.clients.items) |*client| {
-            const cqlen = client.command_queue.length;
-            const command_frame = client.command_queue.pop() orelse game.CommandFrame{};
+            const command_frame = client.command_queue.peek(0) orelse game.CommandFrame{};
             const entity = self.world.get(client.entity) orelse {
                 std.log.warn("client has no entity?", .{});
 
@@ -270,9 +271,13 @@ pub const Server = struct {
             };
 
             switch (entity.entity) {
-                .player => |*player| player.update(self.map, self.tick_length, command_frame),
+                .player => |*player| player.command_frame = command_frame,
             }
+        }
 
+        self.world.tickStage(.movement, .{ .map = self.map }, self.tick_length);
+
+        for (self.clients.items) |*client| {
             for (&client.world_state_pending.entities, self.world.entities) |*old, new| {
                 if (std.meta.eql(old.*, new)) continue;
 
@@ -284,6 +289,9 @@ pub const Server = struct {
                     },
                 });
             }
+
+            const cqlen = client.command_queue.length;
+            const command_frame = client.command_queue.pop() orelse game.CommandFrame{};
 
             client.channel.sendTyped(ServerMessage, .{ .tick_report = .{
                 .last_frame = command_frame.random,
@@ -317,15 +325,17 @@ pub const Client = struct {
 
     channel: net.Channel,
 
-    interpolation_queue: RingBuffer(World, 8) = .{},
-    latest_world_state: World = .{},
+    player_entity: world.State.EntityId = world.State.EntityId.null_handle,
+
+    interpolation_queue: RingBuffer(world.State, 8) = .{},
+    latest_world_state: world.State = .{},
 
     /// Must be as long as server<->client round-trip latency.
     command_queue: RingBuffer(game.CommandFrame, 128) = .{},
 
-    prediction: std.ArrayListUnmanaged(World) = .{},
+    prediction: std.ArrayListUnmanaged(world.State) = .{},
     /// The partial prediction frame that should be displayed.
-    prediction_partial: World = .{},
+    prediction_partial: world.State = .{},
     prediction_dirty: bool = true,
 
     server_command_queue_health_debug: RingBuffer(CommandQueueHealthFrame, 60) = .{},
@@ -405,22 +415,20 @@ pub const Client = struct {
             const index: u32 = @intCast(self.prediction.items.len);
             const command_frame = self.command_queue.peek(index).?;
 
-            for (&accumulator.entities) |*entity| {
-                if (!entity.alive) continue;
-                switch (entity.entity) {
-                    .player => |*player| player.update(self.map, self.tick_length, command_frame),
-                }
+            if (accumulator.get(self.player_entity)) |player| {
+                player.entity.player.command_frame = command_frame;
             }
+
+            accumulator.tickStage(.movement, .{ .map = self.map }, self.tick_length);
 
             self.prediction.append(allocator, accumulator) catch unreachable;
         }
 
-        for (&accumulator.entities) |*entity| {
-            if (!entity.alive) continue;
-            switch (entity.entity) {
-                .player => |*player| player.update(self.map, partial_remainder, partial_frame),
-            }
+        if (accumulator.get(self.player_entity)) |player| {
+            player.entity.player.command_frame = partial_frame;
         }
+
+        accumulator.tickStage(.movement, .{ .map = self.map }, partial_remainder);
 
         self.prediction_partial = accumulator;
     }
@@ -429,6 +437,7 @@ pub const Client = struct {
         switch (message) {
             .hello => |hello| {
                 self.id = hello.your_id;
+                self.player_entity = hello.your_player;
                 self.tick_length = hello.tick_length;
             },
             .entity_refresh => |refresh| {
@@ -866,15 +875,9 @@ pub fn main() !void {
         matrix_viewmodel_projectionview = matrix_viewmodel_projectionview.multiply(linalg.Mat4.rotation(linalg.Vec3.new(0.0, 0.0, 1.0), std.math.pi * 0.5));
 
         var matrix_camera = linalg.Mat4.identity();
-        if (app.client) |client| {
-            var camera_entity = World.EntityId.null_handle;
-
-            for (client.prediction_partial.entities) |entity| {
-                if (!entity.alive) continue;
-                if (entity.entity != .player) continue;
-
-                matrix_camera = entity.entity.player.cameraMatrix();
-                camera_entity = entity.id;
+        if (app.client) |*client| {
+            if (client.prediction_partial.get(client.player_entity)) |player| {
+                matrix_camera = player.entity.player.cameraMatrix();
             }
 
             if (app.third_person) {
@@ -898,9 +901,11 @@ pub fn main() !void {
 
                 const entity = entity_slot.entity;
 
-                walk_anim_time += entity.player.velocity.mul(linalg.Vec3.new(1.0, 1.0, 0.0)).length() * delta / 0.1;
                 do.arrow(.world, entity.player.origin.sub(linalg.Vec3.new(0.0, 0.0, 1.0)), linalg.Vec3.new(0.0, 0.0, 0.5), .{ 1.0, 0.9, 0.4, 1.0 });
-                if (std.meta.eql(entity_slot.id, camera_entity) and !app.third_person) continue;
+
+                if (entity_slot.controller == client.id) continue;
+
+                walk_anim_time += entity.player.velocity.mul(linalg.Vec3.new(1.0, 1.0, 0.0)).length() * delta / 0.1;
 
                 const f1: u32 = @as(u32, @intFromFloat(walk_anim_time / 40.0 * 60.0)) % 40 + 100;
                 const f2 = f1 + 1;
