@@ -634,6 +634,8 @@ pub const App = struct {
     }
 };
 
+pub var server_should_exit = std.atomic.Value(bool).init(false);
+
 pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) !void {
     var map = try Model.load(allocator, "zig-out/assets/x/test-map.model");
     defer map.deinit(allocator);
@@ -649,7 +651,7 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
     var remainder: f64 = 0.0;
 
     var previous_time = std.time.nanoTimestamp();
-    while (true) {
+    while (!server_should_exit.load(.Unordered)) {
         const time = std.time.nanoTimestamp();
         const delta = @as(f64, @floatFromInt(time - previous_time)) / 1_000_000_000.0;
         previous_time = time;
@@ -683,7 +685,9 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    var addr: ?std.net.Address = null;
+    var addr: std.net.Address = std.net.Address.resolveIp("127.0.0.1", 27043) catch unreachable;
+
+    var listen_server_thread: ?std.Thread = null;
 
     _ = args.next();
     while (args.next()) |arg| {
@@ -702,12 +706,25 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, arg, "--dedicated")) {
-            try runServer(allocator, addr.?);
+            try runServer(allocator, addr);
             return;
+        }
+
+        if (std.mem.eql(u8, arg, "--listen")) {
+            // TODO: There's no synchronization between the server listening on
+            // an address and the client connecting to that address.
+            listen_server_thread = try std.Thread.spawn(
+                .{},
+                runServer,
+                .{ allocator, addr },
+            );
         }
     }
 
-    addr = addr orelse std.net.Address.resolveIp("127.0.0.1", 27043) catch unreachable;
+    defer {
+        server_should_exit.store(true, .Unordered);
+        if (listen_server_thread) |thread| thread.join();
+    }
 
     if (c.glfwInit() == 0) return error.GlfwInitFailed;
     defer c.glfwTerminate();
@@ -783,14 +800,12 @@ pub fn main() !void {
 
     // c.glEnable(c.GL_CULL_FACE);
 
-    if (addr) |addr_definite| {
-        const channel = try net.connect(addr_definite);
+    const channel = try net.connect(addr);
 
-        app.client = Client{
-            .map = &map_bmodel,
-            .channel = channel,
-        };
-    }
+    app.client = Client{
+        .map = &map_bmodel,
+        .channel = channel,
+    };
 
     var walk_anim_time: f32 = 0.0;
 
