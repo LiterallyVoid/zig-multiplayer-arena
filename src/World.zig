@@ -67,15 +67,19 @@ pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
             continue;
         }
 
-        interp_entity.entity =
-            switch (cur_entity.entity) {
-            inline else => |payload, tag| blk: {
-                const interpolated_payload =
-                    @field(prev_entity.entity, @tagName(tag))
-                    .interpolate(payload, 1.0 - ratio);
+        interp_entity.* = .{
+            .alive = true,
+            .id = cur_entity.id,
+            .entity = switch (cur_entity.entity) {
+                inline else => |payload, tag| blk: {
+                    const interpolated_payload =
+                        @field(prev_entity.entity, @tagName(tag))
+                        .interpolate(payload, 1.0 - ratio);
 
-                break :blk @unionInit(Entity, @tagName(tag), interpolated_payload);
+                    break :blk @unionInit(Entity, @tagName(tag), interpolated_payload);
+                },
             },
+            .controller = cur_entity.controller,
         };
     }
 
