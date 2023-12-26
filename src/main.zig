@@ -858,8 +858,13 @@ pub fn main() !void {
                 matrix_camera = matrix_camera.multiply(linalg.Mat4.translation(-4.0, 0.0, 0.0));
             }
 
-            const current_worldstate = client.latest_world_state;
-            const previous_worldstate = client.interpolation_queue.peek(client.interpolation_queue.length -% 2) orelse current_worldstate;
+            const current_worldstate = client.interpolation_queue.peek(
+                client.interpolation_queue.length -% 1,
+            ) orelse client.latest_world_state;
+
+            const previous_worldstate = client.interpolation_queue.peek(
+                client.interpolation_queue.length -% 2,
+            ) orelse current_worldstate;
 
             const ratio = client.time_since_last_world_tick / client.tick_length;
 
