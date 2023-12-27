@@ -1,6 +1,7 @@
 const std = @import("std");
 const linalg = @import("./linalg.zig");
 const Model = @import("./Model.zig");
+const State = @import("./world/State.zig");
 
 const do = &@import("./debug_overlay.zig").singleton;
 
@@ -11,6 +12,8 @@ pub const Impact = struct {
 
     brush: Brush,
     plane: Plane,
+
+    entity: ?State.EntityId = null,
 };
 
 pub const Plane = struct {
