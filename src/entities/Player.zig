@@ -71,7 +71,7 @@ pub fn tick_movement(self: *Self, world: World, delta: f32) void {
 
     const options = MoveOptions{};
 
-    self.step_smooth *= std.math.exp(-delta * 18.0);
+    self.step_smooth *= std.math.exp(-delta * 46.0);
 
     self.forces(self.command_frame, delta * 0.5);
     self.physics(world, delta);
