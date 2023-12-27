@@ -276,6 +276,7 @@ pub const Server = struct {
         }
 
         self.world.tickStage(.movement, .{ .map = self.map }, self.tick_length);
+        self.world.tickStage(.weapons, .{ .map = self.map }, self.tick_length);
 
         for (self.clients.items) |*client| {
             for (&client.world_state_pending.entities, self.world.entities) |*old, new| {
@@ -420,6 +421,7 @@ pub const Client = struct {
             }
 
             accumulator.tickStage(.movement, .{ .map = self.map }, self.tick_length);
+            accumulator.tickStage(.weapons, .{ .map = self.map }, self.tick_length);
 
             self.prediction.append(allocator, accumulator) catch unreachable;
         }
@@ -429,6 +431,7 @@ pub const Client = struct {
         }
 
         accumulator.tickStage(.movement, .{ .map = self.map }, partial_remainder);
+        accumulator.tickStage(.weapons, .{ .map = self.map }, partial_remainder);
 
         self.prediction_partial = accumulator;
     }

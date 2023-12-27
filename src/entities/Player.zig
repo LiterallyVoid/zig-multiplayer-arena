@@ -96,6 +96,20 @@ pub fn tick_movement(self: *Self, world: World, delta: f32) void {
     }
 }
 
+pub fn tick_weapons(self: *Self, world: World, delta: f32) void {
+    _ = delta;
+    _ = world;
+    const camera = self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5));
+
+    const forwards = linalg.Vec3.new(
+        @cos(self.angle[1]) * @cos(self.angle[0]),
+        @cos(self.angle[1]) * -@sin(self.angle[0]),
+        @sin(self.angle[1]),
+    );
+
+    do.arrow(.world, camera.add(forwards.mulScalar(1.0)), forwards.mulScalar(50.0), .{ 0.0, 0.1, 0.5, 1.0 });
+}
+
 pub fn forces(self: *Self, command_frame: game.CommandFrame, delta: f32) void {
     var move_2d = linalg.Vec2.new(
         command_frame.movement[1],
