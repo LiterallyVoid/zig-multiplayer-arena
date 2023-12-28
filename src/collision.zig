@@ -38,14 +38,12 @@ pub const Brush = struct {
     first_plane: u32,
 
     planes_count: u32,
-    planes_count_no_bevels: u32,
 
     /// For debugging.
     origin: linalg.Vec3,
 
-    pub fn debug(self: Brush, bmodel: BrushModel, bevels: bool) void {
-        const planes_count = if (bevels) self.planes_count else self.planes_count_no_bevels;
-        for (bmodel.planes[self.first_plane..][0..planes_count]) |plane| {
+    pub fn debug(self: Brush, bmodel: BrushModel) void {
+        for (bmodel.planes[self.first_plane..][0..self.planes_count]) |plane| {
             const color: [4]f32 = .{ 1.0, 0.3, 0.2, 1.0 };
             std.debug.assert(@abs(plane.vec.dot(plane.origin.xyzw(1.0))) < 0.01);
             do.arrow(
@@ -83,7 +81,6 @@ pub const BrushModel = struct {
                 .divScalar(3.0);
 
             brush.first_plane = @intCast(planes.items.len);
-            brush.planes_count_no_bevels = 0;
             defer brush.planes_count = @intCast(planes.items.len - brush.first_plane);
 
             const bext = vertex_positions[1].sub(vertex_positions[0])
@@ -103,22 +100,6 @@ pub const BrushModel = struct {
                     .origin = brush.origin,
                 });
             }
-
-            for (0..3) |j| {
-                const v1 = vertex_positions[j];
-                const v2 = vertex_positions[(j + 1) % 3];
-                const opp = vertex_positions[(j + 2) % 3];
-                _ = opp;
-
-                const edge = v2.sub(v1);
-
-                const out = edge.cross(up).normalized();
-                try planes.append(.{
-                    .vec = out.xyzw(-out.dot(v1)),
-                    .origin = v1.add(v2).divScalar(2.0),
-                });
-            }
-            brush.planes_count_no_bevels = @intCast(planes.items.len - brush.first_plane);
 
             for (0..3) |axis| {
                 for (0..2) |negated| {
@@ -204,7 +185,7 @@ pub const BrushModel = struct {
         allocator.free(self.brushes);
     }
 
-    pub inline fn trace(self: BrushModel, comptime bevel_planes: bool, origin: linalg.Vec3, direction: linalg.Vec3, half_extents: linalg.Vec3) ?Impact {
+    pub fn traceBox(self: BrushModel, origin: linalg.Vec3, direction: linalg.Vec3, half_extents: linalg.Vec3) ?Impact {
         const origin4 = origin.xyzw(1.0);
         const distance4 = direction.xyzw(0.0);
 
@@ -220,9 +201,9 @@ pub const BrushModel = struct {
 
             var exit: f32 = 1.0;
 
-            const planes_count = if (bevel_planes) brush.planes_count else brush.planes_count_no_bevels;
-
-            for (self.planes[brush.first_plane..][0..planes_count]) |plane| {
+            for (
+                self.planes[brush.first_plane..][0..brush.planes_count],
+            ) |plane| {
                 const distance = plane.vec.dot(origin4) - plane.vec.xyz().abs().dot(half_extents);
                 const slope = plane.vec.dot(direction4);
                 const slope_per_length = plane.vec.dot(distance4);
@@ -259,11 +240,7 @@ pub const BrushModel = struct {
     }
 
     pub fn traceRay(self: BrushModel, origin: linalg.Vec3, direction: linalg.Vec3) ?Impact {
-        return self.trace(false, origin, direction, linalg.Vec3.zero());
-    }
-
-    pub fn traceBox(self: BrushModel, origin: linalg.Vec3, direction: linalg.Vec3, half_extents: linalg.Vec3) ?Impact {
-        return self.trace(true, origin, direction, half_extents);
+        return self.traceBox(origin, direction, linalg.Vec3.zero());
     }
 
     pub fn debug(self: BrushModel) void {
