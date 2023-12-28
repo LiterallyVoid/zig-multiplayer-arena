@@ -9,6 +9,11 @@ pub const Hitbox = struct {
     entity: ?State.EntityId,
 };
 
+pub const HitboxList = struct {
+    hitboxes: [State.MAX_ENTITIES]Hitbox,
+    hitboxes_len: u16,
+};
+
 pub const World = struct {
     map: *collision.BrushModel,
 
