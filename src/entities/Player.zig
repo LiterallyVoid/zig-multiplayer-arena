@@ -112,7 +112,6 @@ pub fn tick_weapons(
     delta: f32,
 ) void {
     _ = delta;
-    _ = world;
     const camera = self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5));
 
     const forwards = linalg.Vec3.new(
@@ -121,7 +120,17 @@ pub fn tick_weapons(
         @sin(self.angle[1]),
     );
 
-    do.arrow(.world, camera.add(forwards.mulScalar(1.0)), forwards.mulScalar(50.0), .{ 0.0, 0.1, 0.5, 1.0 });
+    const direction = forwards.mulScalar(5.0);
+    std.log.info("tick weapons {} {}", .{ camera, direction });
+
+    if (world.traceRay(
+        .{},
+        camera,
+        forwards,
+    )) |impact| {
+        std.log.info("tick weapons impact", .{});
+        do.arrow(.world, camera.add(direction.mulScalar(0.95)), direction.mulScalar(impact.time - 0.05), .{ 0.0, 0.1, 0.5, 1.0 });
+    }
 }
 
 pub fn forces(self: *Self, command_frame: game.CommandFrame, delta: f32) void {
