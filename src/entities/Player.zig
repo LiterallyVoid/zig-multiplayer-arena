@@ -2,6 +2,8 @@ const std = @import("std");
 
 const game = @import("../game.zig");
 const World = @import("../world.zig").World;
+const Entity = @import("../world.zig").State.Entity;
+const EntitySlot = @import("../world.zig").State.EntitySlot;
 
 const linalg = @import("../linalg.zig");
 const collision = @import("../collision.zig");
@@ -37,6 +39,10 @@ step_smooth: f32 = 0.0,
 
 command_frame: game.CommandFrame = .{},
 
+pub fn slot(self: *Self) *EntitySlot {
+    return @fieldParentPtr(EntitySlot, "entity", @fieldParentPtr(Entity, "player", self));
+}
+
 pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
     return .{
         .origin = previous.origin.mix(current.origin, ratio),
@@ -50,7 +56,11 @@ pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
     };
 }
 
-pub fn tick_movement(self: *Self, world: World, delta: f32) void {
+pub fn tick_movement(
+    self: *Self,
+    world: World,
+    delta: f32,
+) void {
     self.angle[0] += self.command_frame.look[0];
     self.angle[1] += self.command_frame.look[1];
 
@@ -89,14 +99,18 @@ pub fn tick_movement(self: *Self, world: World, delta: f32) void {
 
             const distance_to_move_up = impulse * t * 0.5 + gravity * t * t;
             var fake_velocity = linalg.Vec3.new(0.0, 0.0, distance_to_move_up);
-            _ = flyMove(world, options, &self.origin, &fake_velocity, 1.0);
+            _ = self.flyMove(world, options, &self.origin, &fake_velocity, 1.0);
 
             self.state = .fall;
         }
     }
 }
 
-pub fn tick_weapons(self: *Self, world: World, delta: f32) void {
+pub fn tick_weapons(
+    self: *Self,
+    world: World,
+    delta: f32,
+) void {
     _ = delta;
     _ = world;
     const camera = self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5));
@@ -133,19 +147,19 @@ pub fn physics(self: *Self, world: World, delta: f32) void {
     const options = MoveOptions{};
     switch (self.state) {
         .fly => {
-            _ = flyMove(world, options, &self.origin, &self.velocity, delta);
+            _ = self.flyMove(world, options, &self.origin, &self.velocity, delta);
         },
         .walk => {
-            const move = walkMove(world, options, &self.origin, &self.velocity, delta);
+            const move = self.walkMove(world, options, &self.origin, &self.velocity, delta);
             if (move) |walk_info| {
                 self.step_smooth += walk_info.step_jump;
             } else {
                 self.state = .fall;
-                _ = flyMove(world, options, &self.origin, &self.velocity, delta);
+                _ = self.flyMove(world, options, &self.origin, &self.velocity, delta);
             }
         },
         .fall => {
-            const move = flyMove(world, options, &self.origin, &self.velocity, delta);
+            const move = self.flyMove(world, options, &self.origin, &self.velocity, delta);
             if (move.on_ground) {
                 self.state = .walk;
             }
@@ -153,7 +167,14 @@ pub fn physics(self: *Self, world: World, delta: f32) void {
     }
 }
 
-pub fn flyMove(world: World, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) struct { on_ground: bool } {
+pub fn flyMove(
+    self: *Self,
+    world: World,
+    options: MoveOptions,
+    position: *linalg.Vec3,
+    velocity: *linalg.Vec3,
+    delta: f32,
+) struct { on_ground: bool } {
     var on_ground = false;
     const half_extents = options.half_extents;
 
@@ -163,7 +184,14 @@ pub fn flyMove(world: World, options: MoveOptions, position: *linalg.Vec3, veloc
 
     for (0..4) |i| {
         var step = velocity.*.mulScalar(remainder);
-        if (world.traceBox(position.*, step, half_extents)) |impact| {
+        if (world.traceBox(
+            .{
+                .ignore_entity = self.slot().id,
+            },
+            position.*,
+            step,
+            half_extents,
+        )) |impact| {
             if (impact.time > 0.0) {
                 position.* = position.*.add(step.mulScalar(impact.time));
 
@@ -208,10 +236,16 @@ pub fn flyMove(world: World, options: MoveOptions, position: *linalg.Vec3, veloc
     };
 }
 
-pub fn walkMove(world: World, options: MoveOptions, position: *linalg.Vec3, velocity: *linalg.Vec3, delta: f32) ?struct {
+pub fn walkMove(
+    self: *Self,
+    world: World,
+    options: MoveOptions,
+    position: *linalg.Vec3,
+    velocity: *linalg.Vec3,
+    delta: f32,
+) ?struct {
     step_jump: f32,
 } {
-
     // [position + step_position_offset, half_extents_minus_step] describes a bounding box whose bottom face is moved `step_height` units inwards.
     const step_position_offset = linalg.Vec3.new(0.0, 0.0, options.step_height * 0.5);
     const half_extents_minus_step = options.half_extents.sub(linalg.Vec3.new(0.0, 0.0, options.step_height * 0.5));
@@ -225,6 +259,9 @@ pub fn walkMove(world: World, options: MoveOptions, position: *linalg.Vec3, velo
     for (0..4) |_| {
         const forwards_target = attempt_velocity.mulScalar(remainder);
         if (world.traceBox(
+            .{
+                .ignore_entity = self.slot().id,
+            },
             attempt_position.add(step_position_offset),
             forwards_target,
             half_extents_minus_step,
@@ -245,6 +282,9 @@ pub fn walkMove(world: World, options: MoveOptions, position: *linalg.Vec3, velo
 
     const step_down_target = -options.step_height * 2.0;
     if (world.traceBox(
+        .{
+            .ignore_entity = self.slot().id,
+        },
         attempt_position.add(step_position_offset),
         linalg.Vec3.new(0.0, 0.0, step_down_target),
         half_extents_minus_step,
@@ -259,7 +299,14 @@ pub fn walkMove(world: World, options: MoveOptions, position: *linalg.Vec3, velo
         return null;
     }
 
-    if (world.traceBox(attempt_position.add(step_position_offset), linalg.Vec3.new(0, 0, options.step_height), half_extents_minus_step)) |_| {
+    if (world.traceBox(
+        .{
+            .ignore_entity = self.slot().id,
+        },
+        attempt_position.add(step_position_offset),
+        linalg.Vec3.new(0, 0, options.step_height),
+        half_extents_minus_step,
+    )) |_| {
         return null;
     } else {
         attempt_position.data[2] += options.step_height;
