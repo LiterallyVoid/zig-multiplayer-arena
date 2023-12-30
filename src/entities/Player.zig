@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const game = @import("../game.zig");
-const World = @import("../world.zig").World;
+const WorldInterface = @import("../world.zig").WorldInterface;
 const Entity = @import("../world.zig").State.Entity;
 const EntitySlot = @import("../world.zig").State.EntitySlot;
 
@@ -39,6 +39,8 @@ step_smooth: f32 = 0.0,
 
 command_frame: game.CommandFrame = .{},
 
+refire_timer: f32 = 0.0,
+
 pub fn slot(self: *Self) *EntitySlot {
     return @fieldParentPtr(EntitySlot, "entity", @fieldParentPtr(Entity, "player", self));
 }
@@ -58,7 +60,7 @@ pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
 
 pub fn tick_movement(
     self: *Self,
-    world: World,
+    world: WorldInterface,
     delta: f32,
 ) void {
     self.angle[0] += self.command_frame.look[0];
@@ -108,10 +110,17 @@ pub fn tick_movement(
 
 pub fn tick_weapons(
     self: *Self,
-    world: World,
+    world: WorldInterface,
     delta: f32,
 ) void {
-    _ = delta;
+    self.refire_timer += delta;
+
+    if (self.refire_timer < 0.5 or self.command_frame.getImpulse(.attack) == null) {
+        return;
+    }
+
+    self.refire_timer = 0.0;
+
     const camera = self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5));
 
     const forwards = linalg.Vec3.new(
@@ -120,16 +129,43 @@ pub fn tick_weapons(
         @sin(self.angle[1]),
     );
 
-    const direction = forwards.mulScalar(5.0);
-    std.log.info("tick weapons {} {}", .{ camera, direction });
+    const direction = forwards.mulScalar(50.0);
 
     if (world.traceRay(
-        .{},
+        .{
+            .ignore_entity = self.slot().id,
+        },
         camera,
-        forwards,
+        direction,
     )) |impact| {
-        std.log.info("tick weapons impact", .{});
-        do.arrow(.world, camera.add(direction.mulScalar(0.95)), direction.mulScalar(impact.time - 0.05), .{ 0.0, 0.1, 0.5, 1.0 });
+        world.createEffect(.{
+            .kind = .tracer,
+            .position = camera,
+            .direction = direction,
+        });
+
+        world.createEffect(.{
+            .kind = .muzzleflash,
+            .position = camera,
+            .direction = direction.normalized(),
+        });
+
+        do.arrow(
+            .world,
+            camera.add(direction.mulScalar(0.05)),
+            direction.mulScalar(impact.time - 0.05),
+            .{ 0.0, 0.1, 0.5, 1.0 },
+        );
+
+        if (impact.entity) |entity_id| {
+            std.log.err("{} just shot {}", .{ self.slot().id, entity_id });
+            if (world.get(entity_id)) |entity| {
+                entity.entity.player.origin = linalg.Vec3.new(0.0, 0.0, 5.0);
+                entity.entity.player.velocity = linalg.Vec3.new(0.0, 0.0, 0.0);
+            }
+        } else {
+            std.log.err("{} just shot the floor", .{self.slot().id});
+        }
     }
 }
 
@@ -152,7 +188,7 @@ pub fn forces(self: *Self, command_frame: game.CommandFrame, delta: f32) void {
     }
 }
 
-pub fn physics(self: *Self, world: World, delta: f32) void {
+pub fn physics(self: *Self, world: WorldInterface, delta: f32) void {
     const options = MoveOptions{};
     switch (self.state) {
         .fly => {
@@ -178,7 +214,7 @@ pub fn physics(self: *Self, world: World, delta: f32) void {
 
 pub fn flyMove(
     self: *Self,
-    world: World,
+    world: WorldInterface,
     options: MoveOptions,
     position: *linalg.Vec3,
     velocity: *linalg.Vec3,
@@ -247,7 +283,7 @@ pub fn flyMove(
 
 pub fn walkMove(
     self: *Self,
-    world: World,
+    world: WorldInterface,
     options: MoveOptions,
     position: *linalg.Vec3,
     velocity: *linalg.Vec3,

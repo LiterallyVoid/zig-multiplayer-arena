@@ -1,5 +1,5 @@
 const std = @import("std");
-const World = @import("../world.zig").World;
+const WorldInterface = @import("../world.zig").WorldInterface;
 const Self = @This();
 
 const Player = @import("../entities/Player.zig");
@@ -88,7 +88,7 @@ pub fn interpolate(previous: Self, current: Self, ratio: f32) Self {
     return interpolated;
 }
 
-pub fn tickStage(self: *Self, comptime stage: @TypeOf(.enum_literal), world: World, delta: f32) void {
+pub fn tickStage(self: *Self, comptime stage: @TypeOf(.enum_literal), world: WorldInterface, delta: f32) void {
     for (&self.entities) |*entity_slot| if (entity_slot.alive)
         switch (entity_slot.entity) {
             inline else => |*payload| @field(@TypeOf(payload.*), "tick_" ++ @tagName(stage))(payload, world, delta),

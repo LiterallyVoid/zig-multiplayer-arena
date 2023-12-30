@@ -275,8 +275,16 @@ pub const Server = struct {
             }
         }
 
-        self.world.tickStage(.movement, .{ .map = self.map }, self.tick_length);
-        self.world.tickStage(.weapons, .{ .map = self.map }, self.tick_length);
+        self.world.tickStage(
+            .movement,
+            .{ .map = self.map, .accessible_state = &self.world },
+            self.tick_length,
+        );
+        self.world.tickStage(
+            .weapons,
+            .{ .map = self.map, .accessible_state = &self.world },
+            self.tick_length,
+        );
 
         for (self.clients.items) |*client| {
             for (&client.world_state_pending.entities, self.world.entities) |*old, new| {
@@ -420,8 +428,16 @@ pub const Client = struct {
                 player.entity.player.command_frame = command_frame;
             }
 
-            accumulator.tickStage(.movement, .{ .map = self.map }, self.tick_length);
-            accumulator.tickStage(.weapons, .{ .map = self.map }, self.tick_length);
+            accumulator.tickStage(
+                .movement,
+                .{ .map = self.map, .accessible_state = &accumulator },
+                self.tick_length,
+            );
+            accumulator.tickStage(
+                .weapons,
+                .{ .map = self.map, .accessible_state = &accumulator },
+                self.tick_length,
+            );
 
             self.prediction.append(allocator, accumulator) catch unreachable;
         }
@@ -430,8 +446,16 @@ pub const Client = struct {
             player.entity.player.command_frame = partial_frame;
         }
 
-        accumulator.tickStage(.movement, .{ .map = self.map }, partial_remainder);
-        accumulator.tickStage(.weapons, .{ .map = self.map }, partial_remainder);
+        accumulator.tickStage(
+            .movement,
+            .{ .map = self.map, .accessible_state = &accumulator },
+            partial_remainder,
+        );
+        accumulator.tickStage(
+            .weapons,
+            .{ .map = self.map, .accessible_state = &accumulator },
+            partial_remainder,
+        );
 
         self.prediction_partial = accumulator;
     }
@@ -682,7 +706,12 @@ pub fn runServer(allocator: std.mem.Allocator, listen_address: std.net.Address) 
 
             var timer = try std.time.Timer.start();
             server.tick();
-            std.log.info("tick took {d:.3}ms of {d:.3}ms budget", .{ @as(f64, @floatFromInt(timer.read())) / 1_000_000.0, server.tick_length * 1000.0 });
+
+            const tick_ms = @as(f64, @floatFromInt(timer.read())) / 1_000_000.0;
+            const tick_budget_ms = server.tick_length * 1_000.0;
+            if (tick_ms > tick_budget_ms / 2.0) {
+                std.log.warn("tick took {d:.3}ms of {d:.3}ms budget", .{ tick_ms, tick_budget_ms });
+            }
         }
 
         const channel = net_server.accept() catch |err| switch (err) {

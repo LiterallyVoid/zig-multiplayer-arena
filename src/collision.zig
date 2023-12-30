@@ -218,13 +218,13 @@ pub const BrushModel = struct {
                         entrance_plane = plane;
                     }
                 } else if (slope_per_length > 0.0) {
-                    exit = @min(exit, time);
+                    exit = @min(exit, time + (1e-4 / slope));
                 } else {
                     if (distance > -1e-6) continue :brushes;
                 }
             }
 
-            if (entrance < exit + 1e-6 and !entrance_bad) {
+            if (entrance < exit and !entrance_bad) {
                 if (nearest_impact) |last_impact| {
                     if (last_impact.time < entrance) continue :brushes;
                 }
