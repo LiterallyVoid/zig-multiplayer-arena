@@ -189,7 +189,8 @@ pub const BrushModel = struct {
         const origin4 = origin.xyzw(1.0);
         const distance4 = direction.xyzw(0.0);
 
-        const direction4 = distance4.normalized();
+        const ray_length = direction.length();
+        const direction4 = distance4.divScalar(ray_length);
 
         var nearest_impact: ?Impact = null;
 
@@ -218,18 +219,19 @@ pub const BrushModel = struct {
                         entrance_plane = plane;
                     }
                 } else if (slope_per_length > 0.0) {
-                    exit = @min(exit, time + (1e-4 / slope));
+                    exit = @min(exit, time);
                 } else {
                     if (distance > -1e-6) continue :brushes;
                 }
             }
 
-            if (entrance < exit and !entrance_bad) {
+            if (exit >= 0.0 and (exit - entrance) > -1e-6 / ray_length) {
                 if (nearest_impact) |last_impact| {
                     if (last_impact.time < entrance) continue :brushes;
                 }
+
                 nearest_impact = Impact{
-                    .time = entrance,
+                    .time = @max(0.0, entrance),
                     .brush = brush,
                     .plane = entrance_plane,
                 };
