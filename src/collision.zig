@@ -10,8 +10,10 @@ const DUPE_PLANE_EPSILON = 1e-3;
 pub const Impact = struct {
     time: f32,
 
-    brush: Brush,
-    plane: Plane,
+    normal: linalg.Vec3,
+
+    brush: ?Brush,
+    plane: ?Plane,
 
     entity: ?State.EntityId = null,
 };
@@ -195,12 +197,12 @@ pub const BrushModel = struct {
         var nearest_impact: ?Impact = null;
 
         brushes: for (self.brushes) |brush| {
-            var entrance: f32 = -1.0;
+            var entrance: f32 = -std.math.inf(f32);
             var entrance_distance: f32 = 0.0;
             var entrance_bad = true;
             var entrance_plane: Plane = undefined;
 
-            var exit: f32 = 1.0;
+            var exit: f32 = 2.0;
 
             for (
                 self.planes[brush.first_plane..][0..brush.planes_count],
@@ -225,13 +227,14 @@ pub const BrushModel = struct {
                 }
             }
 
-            if (exit >= 0.0 and (exit - entrance) > -1e-6 / ray_length) {
+            if (entrance <= 1.0 and exit >= 0.0 and (exit - entrance) > -1e-6 / ray_length) {
                 if (nearest_impact) |last_impact| {
                     if (last_impact.time < entrance) continue :brushes;
                 }
 
                 nearest_impact = Impact{
                     .time = @max(0.0, entrance),
+                    .normal = entrance_plane.vec.xyz(),
                     .brush = brush,
                     .plane = entrance_plane,
                 };

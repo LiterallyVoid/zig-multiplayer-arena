@@ -243,7 +243,7 @@ pub fn flyMove(
                 remainder *= 1.0 - impact.time;
             }
 
-            const normal = impact.plane.vec.xyz();
+            const normal = impact.normal;
             if (normal.data[2] > options.floor_max_slope) {
                 on_ground = true;
             }
@@ -256,13 +256,6 @@ pub fn flyMove(
                 const edge = previous_normal.cross(normal).normalized();
                 velocity.* = edge.mulScalar(edge.dot(velocity.*));
             }
-
-            do.arrow(
-                .world,
-                position.*.sub(impact.plane.vec.xyz().mulScalar(0.5)),
-                impact.plane.vec.xyz().mulScalar(0.2),
-                .{ 1.0, 0.0, 1.0, 1.0 },
-            );
 
             normals[i] = normal;
         } else {
@@ -314,7 +307,7 @@ pub fn walkMove(
             attempt_position = attempt_position.add(forwards_target.mulScalar(impact.time));
             remainder *= (1.0 - impact.time);
 
-            const normal = impact.plane.vec.xyz();
+            const normal = impact.normal;
             attempt_velocity = attempt_velocity.sub(normal.mulScalar(attempt_velocity.dot(normal) * 1.005));
         } else {
             attempt_position = attempt_position.add(forwards_target);
@@ -335,10 +328,13 @@ pub fn walkMove(
         half_extents_minus_step,
     )) |step_down_impact| {
         // We hit something, but it WASN'T GROUND!
-        if (step_down_impact.plane.vec.data[2] <= options.floor_max_slope) return null;
+        if (step_down_impact.normal.data[2] <= options.floor_max_slope) return null;
         attempt_position.data[2] += step_down_target * step_down_impact.time;
 
-        floor_plane = step_down_impact.plane;
+        floor_plane = collision.Plane{
+            .vec = step_down_impact.normal.xyzw(0.0),
+            .origin = undefined,
+        };
     } else {
         // If there isn't a floor below, abort! THAT'S EXACTLY WHAT I WAS AFRAID OF, GEOFF!
         return null;
