@@ -58,8 +58,8 @@ pub const WorldInterface = struct {
         velocity: linalg.Vec3,
         half_extents: linalg.Vec3,
     ) ?collision.Impact {
-        const center_time = offset.div(velocity);
-        const half_time = half_extents.div(velocity);
+        const center_time = offset.div(velocity).negate();
+        const half_time = half_extents.div(velocity).negate();
 
         const entrance_vec = center_time.sub(half_time.abs());
         const exit_vec = center_time.add(half_time.abs());
@@ -70,7 +70,7 @@ pub const WorldInterface = struct {
 
         for (0..3) |axis| {
             if (velocity.data[axis] == 0.0) {
-                if (@abs(offset.data[axis]) > half_extents.data[axis]) return null;
+                if (@abs(offset.data[axis]) > half_extents.data[axis] - 1e-6) return null;
                 continue;
             }
 
@@ -85,7 +85,7 @@ pub const WorldInterface = struct {
             }
         }
 
-        if (entrance > 1.0 or exit < 0.0 or exit < entrance - (1e-6 / velocity.length())) {
+        if (entrance > 1.0 or exit <= 0.0 or exit < entrance - 1e-6) {
             return null;
         }
 

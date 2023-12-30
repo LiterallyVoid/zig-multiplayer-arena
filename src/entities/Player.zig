@@ -160,7 +160,7 @@ pub fn tick_weapons(
         if (impact.entity) |entity_id| {
             std.log.err("{} just shot {}", .{ self.slot().id, entity_id });
             if (world.get(entity_id)) |entity| {
-                entity.entity.player.origin = linalg.Vec3.new(0.0, 0.0, 5.0);
+                entity.entity.player.origin = linalg.Vec3.new(0.0, 0.0, 25.0);
                 entity.entity.player.velocity = linalg.Vec3.new(0.0, 0.0, 0.0);
             }
         } else {
