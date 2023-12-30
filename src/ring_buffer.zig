@@ -32,6 +32,14 @@ pub fn RingBuffer(comptime T: type, comptime limit: u32) type {
                 limit;
             return self.items[wrapped_index];
         }
+
+        pub fn peekMut(self: *Self, index: u32) ?*T {
+            if (index < 0 or index >= self.length) return null;
+            const wrapped_index =
+                (self.insert_head + limit - self.length + index + 1) %
+                limit;
+            return &self.items[wrapped_index];
+        }
     };
 }
 

@@ -967,6 +967,23 @@ pub fn main() !void {
                     .gl_texture = null,
                 });
             }
+
+            var w = world.WorldInterface{
+                .map = client.map,
+                .accessible_state = client.interpolation_queue.peekMut(client.interpolation_queue.length) orelse &client.latest_world_state,
+            };
+
+            if (client.prediction_partial.get(client.player_entity)) |player_slot| {
+                const impact = w.traceBox(
+                    .{
+                        .ignore_entity = client.player_entity,
+                    },
+                    player_slot.entity.player.origin,
+                    matrix_camera.multiplyVector(linalg.Vec3.new(50.0, 0.0, 0.0).xyzw(0.0)).xyz(),
+                    linalg.Vec3.new(0.2, 0.2, 0.2),
+                );
+                std.log.info("ooooo {?}", .{impact});
+            }
         }
 
         matrix_projectionview = matrix_projectionview.multiply(matrix_camera.inverse());
