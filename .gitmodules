@@ -4,3 +4,6 @@
 [submodule "deps/s2s"]
 	path = deps/s2s
 	url = https://github.com/ziglibs/s2s.git
+[submodule "deps/glfw-build-zig"]
+	path = deps/glfw-build-zig
+	url = https://github.com/LiterallyVoid/glfw-build-zig.git
