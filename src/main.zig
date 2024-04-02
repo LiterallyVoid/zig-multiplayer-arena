@@ -11,6 +11,7 @@ pub const net = @import("./net.zig");
 pub const world = @import("./world.zig");
 pub const RingBuffer = @import("./ring_buffer.zig").RingBuffer;
 pub const game = @import("./game.zig");
+pub const EffectManager = @import("./EffectManager.zig");
 const do = &debug_overlay.singleton;
 
 pub const ActionId = enum {
@@ -32,6 +33,7 @@ pub const ActionId = enum {
     debug2,
     debug3,
     debug4,
+    debug5,
 
     pub const max_enum = std.meta.fields(ActionId).len;
 };
@@ -167,6 +169,7 @@ pub const ServerClient = struct {
 
     entity: world.State.EntityId,
     command_queue: RingBuffer(game.CommandFrame, 8),
+    last_command_frame_time: i128,
 
     /// The world state that's currently in flight to the client.
     world_state_pending: world.State,
@@ -231,6 +234,8 @@ pub const Server = struct {
             .channel = channel,
             .entity = entity.id,
             .command_queue = .{},
+            .last_command_frame_time = std.time.nanoTimestamp(),
+
             .world_state_pending = .{},
         });
     }
@@ -240,11 +245,14 @@ pub const Server = struct {
         switch (message) {
             .tick => |tick_info| {
                 client.command_queue.push(tick_info.command_frame);
+                client.last_command_frame_time = std.time.nanoTimestamp();
             },
         }
     }
 
     pub fn tick(self: *Server) void {
+        const time = std.time.nanoTimestamp();
+
         for (self.clients.items) |*client| {
             while (client.channel.pollTyped(ClientMessage)) |message| {
                 self.handleMessage(client, message);
@@ -302,11 +310,20 @@ pub const Server = struct {
             const cqlen = client.command_queue.length;
             const command_frame = client.command_queue.pop() orelse game.CommandFrame{};
 
-            client.channel.sendTyped(ServerMessage, .{ .tick_report = .{
-                .last_frame = command_frame.random,
-                .command_queue_length = cqlen,
-                .time_since_receiving_command = 0.0,
-            } });
+            const time_since_receiving_command =
+                @as(f32, @floatFromInt(time - client.last_command_frame_time)) / 1_000_000_000.0;
+            _ = time_since_receiving_command;
+
+            client.channel.sendTyped(ServerMessage, .{
+                .tick_report = .{
+                    .last_frame = command_frame.random,
+                    .command_queue_length = cqlen,
+                    // .time_since_receiving_command = @min(time_since_receiving_command, self.tick_length),
+
+                    // @TODO: Asynchronous packet receive
+                    .time_since_receiving_command = 0.0,
+                },
+            });
         }
     }
 };
@@ -477,12 +494,12 @@ pub const Client = struct {
                 var slow = false;
                 var fast = false;
 
-                if (queued_ticks < 0.5) {
+                if (queued_ticks < 0.9) {
                     fast = true;
-                    self.timescale = 1.15;
-                } else if (queued_ticks > 1.5) {
+                    self.timescale = 1.1;
+                } else if (queued_ticks > 2.1) {
                     slow = true;
-                    self.timescale = 0.85;
+                    self.timescale = 0.9;
                 }
 
                 self.server_command_queue_health_debug.push(.{
@@ -1001,7 +1018,7 @@ pub fn main() !void {
         }
 
         // TODO: use an arena allocator here
-        if (false) {
+        if (true) {
             var pose_1 = try model.blankPose(frame_allocator);
             var pose_2 = try model.blankPose(frame_allocator);
 

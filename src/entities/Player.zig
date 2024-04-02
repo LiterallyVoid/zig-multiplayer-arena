@@ -123,11 +123,14 @@ pub fn tick_weapons(
 
     const camera = self.origin.add(linalg.Vec3.new(0.0, 0.0, 0.5));
 
-    const forwards = linalg.Vec3.new(
-        @cos(self.angle[1]) * @cos(self.angle[0]),
-        @cos(self.angle[1]) * -@sin(self.angle[0]),
-        @sin(self.angle[1]),
+    const basis = self.calculateBasis();
+
+    const forwards = basis.col(0);
+
+    const muzzle_offset = basis.multiplyVector(
+        linalg.Vec3.new(0.3, 0.1, 0.5),
     );
+    const muzzle = camera.add(muzzle_offset);
 
     const direction = forwards.mulScalar(50.0);
 
@@ -140,13 +143,13 @@ pub fn tick_weapons(
     )) |impact| {
         world.createEffect(.{
             .kind = .tracer,
-            .position = camera,
-            .direction = direction,
+            .position = muzzle,
+            .direction = direction.mulScalar(impact.time).sub(muzzle_offset),
         });
 
         world.createEffect(.{
             .kind = .muzzleflash,
-            .position = camera,
+            .position = muzzle,
             .direction = direction.normalized(),
         });
 

@@ -362,9 +362,9 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
             _ = options;
 
             try std.fmt.format(out_stream, "Matrix4{{", .{});
-            inline for (self.data) |row| {
+            inline for (self.data) |r| {
                 try std.fmt.format(out_stream, " {{", .{});
-                inline for (row) |elem| {
+                inline for (r) |elem| {
                     try std.fmt.format(out_stream, "{d}, ", .{elem});
                 }
                 try std.fmt.format(out_stream, "}},", .{});
@@ -573,8 +573,8 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
 
         pub fn transpose(self: Self) Self {
             var mat = Self.zero();
-            inline for (&mat.data, 0..) |*row, x| {
-                inline for (row, 0..) |*elem, y| {
+            inline for (&mat.data, 0..) |*r, x| {
+                inline for (r, 0..) |*elem, y| {
                     elem.* = self.data[y][x];
                 }
             }
@@ -583,8 +583,8 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
 
         pub fn toArray(self: Self, comptime T: type, comptime row_major: bool) [dim * dim]T {
             var array: [dim * dim]T = undefined;
-            inline for (self.data, 0..) |row, i| {
-                inline for (row, 0..) |el, j| {
+            inline for (self.data, 0..) |r, i| {
+                inline for (r, 0..) |el, j| {
                     const id = if (row_major) (i * dim + j) else (j * dim + i);
                     array[id] = primitiveCast(T, el);
                 }
@@ -594,13 +594,31 @@ pub fn Matrix(comptime dim: comptime_int, comptime Element: type, comptime Vec: 
 
         pub fn fromArray(comptime T: type, comptime row_major: bool, array: [dim * dim]T) Self {
             var self: Self = undefined;
-            inline for (&self.data, 0..) |*row, i| {
-                inline for (row, 0..) |*element, j| {
+            inline for (&self.data, 0..) |*r, i| {
+                inline for (r, 0..) |*element, j| {
                     const id = if (row_major) (i * dim + j) else (j * dim + i);
                     element.* = primitiveCast(T, array[id]);
                 }
             }
             return self;
+        }
+
+        pub fn row(self: Self, j: usize) Vec {
+            var vec: Vec = undefined;
+            for (&vec.data, 0..) |*element, i| {
+                element.* = self.data[j][i];
+            }
+
+            return vec;
+        }
+
+        pub fn col(self: Self, j: usize) Vec {
+            var vec: Vec = undefined;
+            for (&vec.data, 0..) |*element, i| {
+                element.* = self.data[i][j];
+            }
+
+            return vec;
         }
     };
 }
