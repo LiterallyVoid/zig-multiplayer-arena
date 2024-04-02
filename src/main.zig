@@ -985,6 +985,44 @@ pub fn main() !void {
                 });
             }
 
+            // TODO: use an arena allocator here
+            var pose_1 = try model.blankPose(frame_allocator);
+            var pose_2 = try model.blankPose(frame_allocator);
+
+            var animation_time: f32 = 0.0;
+            if (client.prediction_partial.get(client.player_entity)) |player| {
+                animation_time = player.entity.player.refire_timer;
+                if (animation_time > 1.333) {
+                    animation_time = 1.333;
+                }
+            }
+
+            const f1: u32 = @as(u32, @intFromFloat(animation_time * 60.0)) % 80 + 101;
+            const f2 = f1 + 1;
+            const fr = @mod(@as(f32, @floatCast(animation_time)) * 60.0, 1.0);
+
+            pose_1.fromInterpolation(model.framePose(f1), model.framePose(f2), fr);
+            // pose_1.fromCopy(model.framePose(101));
+            pose_2.fromCopy(model.rest_pose);
+
+            pose_2.addLayer(pose_1, 1.0);
+
+            const bone_matrices = try model.poseMatrices(frame_allocator, pose_2);
+
+            do.addObject(.{
+                .pass = .viewmodel_opaque,
+                .gl_vao = model.gl_vao,
+                .vertex_first = 0,
+                .vertices_count = model.vertices_count,
+
+                .model_matrix = matrix_camera,
+
+                .shader = &shader,
+                .color = .{ 1.0, 1.0, 1.0, 1.0 },
+
+                .bone_matrices = bone_matrices,
+            });
+
             // var w = world.WorldInterface{
             //     .map = client.map,
             //     .accessible_state = client.interpolation_queue.peekMut(client.interpolation_queue.length) orelse &client.latest_world_state,
@@ -1015,32 +1053,6 @@ pub fn main() !void {
             map.draw();
 
             break :map {};
-        }
-
-        // TODO: use an arena allocator here
-        if (true) {
-            var pose_1 = try model.blankPose(frame_allocator);
-            var pose_2 = try model.blankPose(frame_allocator);
-
-            const f1: u32 = @as(u32, @intFromFloat(time * 60.0)) % 80 + 101;
-            const f2 = f1 + 1;
-            const fr = @mod(@as(f32, @floatCast(time)) * 60.0, 1.0);
-
-            pose_1.fromInterpolation(model.framePose(f1), model.framePose(f2), fr);
-            // pose_1.fromCopy(model.framePose(101));
-            pose_2.fromCopy(model.rest_pose);
-
-            pose_2.addLayer(pose_1, 1.0);
-
-            const bone_matrices = try model.poseMatrices(frame_allocator, pose_2);
-
-            shader.bindWithUniforms(.{
-                .u_matrix_projectionview = matrix_viewmodel_projectionview,
-                .u_matrix_model = matrix_camera,
-                .u_matrix_model_normal = matrix_camera.toMat3(),
-                .u_bone_matrices = bone_matrices,
-            });
-            model.draw();
         }
 
         // map_bmodel.debug();
