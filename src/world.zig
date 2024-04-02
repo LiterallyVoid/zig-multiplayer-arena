@@ -75,7 +75,7 @@ pub const WorldInterface = struct {
             }
 
             if (entrance_vec.data[axis] > entrance) {
-                entrance = entrance_vec.data[axis];
+                entrance = entrance_vec.data[axis] - (0.0001 / -velocity.data[axis]);
                 entrance_normal = linalg.Vec3.zero();
                 entrance_normal.data[axis] = if (velocity.data[axis] < 0.0) 1.0 else -1.0;
             }
