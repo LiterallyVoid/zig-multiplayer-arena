@@ -1,0 +1,6 @@
+[submodule "deps/glfw"]
+	path = deps/glfw
+	url = https://github.com/glfw/glfw.git
+[submodule "deps/s2s"]
+	path = deps/s2s
+	url = https://github.com/ziglibs/s2s.git
